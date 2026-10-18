@@ -4,7 +4,7 @@ import save from './save';
 export default async function api(path, { method = 'GET', body } = {}) {
   const key = path.startsWith('/admin') ? 'qr_admin' : 'qr_student'; // papers/attempts routes also carry the student token
   const s = load(key, null, sessionStorage);
-  const res = await fetch('/api' + path, {
+  const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api' + path, {
     method,
     headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(s?.token ? { Authorization: 'Bearer ' + s.token } : {}) },
     body: body ? JSON.stringify(body) : undefined
