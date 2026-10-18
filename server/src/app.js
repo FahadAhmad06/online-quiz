@@ -33,6 +33,8 @@ const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../c
 if (fs.existsSync(dist)) {
   app.use(express.static(dist));
   app.get('*', (req, res) => res.sendFile(path.join(dist, 'index.html')));
+} else {
+  app.get('/', (req, res) => res.json({ ok: true, service: 'QuizRoom API' })); // API-only deployment (e.g. Vercel); the real routes are under /api
 }
 app.use(errorHandler);
 export default app;
