@@ -6,9 +6,10 @@ import asyncHandler from '../utils/asyncHandler.js';
 import httpError from '../utils/httpError.js';
 import safeEqual from '../utils/safeEqual.js';
 import signToken from '../utils/signToken.js';
+import makeLimiter from '../middleware/rateLimit.js';
 
 const r = Router();
-r.post('/login', asyncHandler(async (req, res) => {
+r.post('/login', makeLimiter({ max: 20, message: 'Too many attempts. Please try again later.' }), asyncHandler(async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase(), password = String(req.body?.password || '');
   let isSuper = false, ok = false;
   if (email === config.ownerEmail && safeEqual(password, config.ownerPassword)) { ok = true; isSuper = true; }

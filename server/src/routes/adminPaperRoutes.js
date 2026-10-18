@@ -12,6 +12,7 @@ import paperStats from '../utils/paperStats.js';
 import paperSummary from '../utils/paperSummary.js';
 import buildRun from '../utils/buildRun.js';
 import attemptPayload from '../utils/attemptPayload.js';
+import newAttemptFields from '../utils/newAttemptFields.js';
 
 const r = Router(), DAY = 86400000;
 const findPaper = async id => { const p = await Paper.findById(id); if (!p) throw httpError(404, 'Paper not found'); return p; };
@@ -74,8 +75,9 @@ r.post('/papers/:id/reopen', asyncHandler(async (req, res) => {
 
 r.post('/papers/:id/preview', asyncHandler(async (req, res) => {
   const p = (await findPaper(req.params.id)).toObject();
+  const run = buildRun(p.questions, p.shuffle);
   const attempt = await Attempt.create({
-    paperCode: p.code, paperTitle: p.title, name: 'Admin', roll: '-', email: req.admin.email, preview: true, run: buildRun(p.questions, p.shuffle)
+    paperCode: p.code, paperTitle: p.title, name: 'Admin', roll: '-', email: req.admin.email, preview: true, run, ...newAttemptFields(p, run)
   });
   res.json(attemptPayload(attempt, p));
 }));

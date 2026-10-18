@@ -29,7 +29,12 @@ export default function Rolls() {
   const regenerate = a => act(() => api('/admin/rolls/' + a._id + '/regenerate', { method: 'POST' }), setReveal);
   const disable = a => act(() => api('/admin/rolls/' + a._id + '/disable', { method: 'POST' }));
   const enable = a => act(() => api('/admin/rolls/' + a._id + '/enable', { method: 'POST' }));
-  const remove = a => confirm('Remove roll number ' + a.rollNumber + '?') && act(() => api('/admin/rolls/' + a._id, { method: 'DELETE' }));
+  const remove = a => {
+    const question = a.isRegistered
+      ? 'Delete the student ' + (a.registeredStudent?.name || a.rollNumber) + ' (' + a.rollNumber + ')? This permanently deletes their account; they will need to register again with a new PIN. Their past results are not affected.'
+      : 'Remove roll number ' + a.rollNumber + '?';
+    return confirm(question) && act(() => api('/admin/rolls/' + a._id, { method: 'DELETE' }));
+  };
 
   return (
     <Async state={state}>{rolls => (<>
@@ -70,7 +75,7 @@ export default function Rolls() {
                       {!a.isRegistered && <button className="small" onClick={() => regenerate(a)} disabled={busy}>Regenerate PIN</button>}
                       {a.isEnabled ? <button className="ghost small" onClick={() => disable(a)} disabled={busy}>Disable</button>
                         : <button className="ghost small" onClick={() => enable(a)} disabled={busy}>Enable</button>}
-                      {!a.isRegistered && <button className="danger" onClick={() => remove(a)} disabled={busy}>Remove</button>}
+                      <button className="danger" onClick={() => remove(a)} disabled={busy}>{a.isRegistered ? 'Delete student' : 'Remove'}</button>
                     </div>
                   </td>
                 </tr>
