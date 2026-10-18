@@ -55,3 +55,8 @@ th,td{text-align:left;padding:8px 6px;border-top:1px solid var(--line)}
 .copy code{flex:1;overflow-wrap:anywhere;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 select{padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
 .err{color:var(--bad-line);font-weight:600}
+.pwrap{position:relative;margin-bottom:10px}
+.pwrap input{padding-right:42px;margin-bottom:0;width:100%}
+.pwrap .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:none;border:0;padding:0;color:var(--muted)}
+.pwrap .eye:hover{color:var(--ink)}
+.pwrap .eye:focus-visible{outline:3px solid var(--accent);outline-offset:2px}

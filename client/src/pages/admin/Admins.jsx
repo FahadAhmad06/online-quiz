@@ -3,6 +3,7 @@ import useFetch from '../../hooks/useFetch';
 import Async from '../../components/Async';
 import api from '../../utils/api';
 import validEmail from '../../utils/validEmail';
+import PasswordField from '../../components/PasswordField';
 export default function Admins() {
   const state = useFetch('/admin/admins');
   const [f, setF] = useState({ email: '', password: '' }), [msg, setMsg] = useState(''), [busy, setBusy] = useState(false);
@@ -29,7 +30,7 @@ export default function Admins() {
         ))}
         <div style={{ marginTop: 12 }}>
           <input type="email" placeholder="Email to make admin" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} />
-          <input type="password" placeholder="Password for this admin (min 6 characters)" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} />
+          <PasswordField placeholder="Password for this admin (min 6 characters)" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
           <button onClick={add} disabled={busy}>{busy ? 'Adding…' : 'Make admin'}</button>
           <p className="err msg" role="alert">{msg}</p>
         </div>

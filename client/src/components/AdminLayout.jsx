@@ -12,6 +12,7 @@ export default function AdminLayout() {
       <NavLink end to="/admin">Dashboard</NavLink>
       <NavLink to="/admin/papers">Papers</NavLink>
       <NavLink to="/admin/results">Results</NavLink>
+      <NavLink to="/admin/rolls">Students</NavLink>
       {s.isSuper && <NavLink to="/admin/admins">Admins</NavLink>}
     </nav>
     <Outlet />

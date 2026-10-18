@@ -17,7 +17,7 @@ export default function PaperForm({ onSubmit }) {
   return (
     <div className="card">
       <input type="text" placeholder="Paper title, e.g. Introduction to Marketing quiz 1" value={f.title} onChange={e => setF({ ...f, title: e.target.value })} />
-      <div className="muted">Time for each question, in minutes (0 = no limit)</div>
+      <div className="muted">Time per question, in minutes (0 = no limit) — multiplied by the question count, this becomes one shared countdown for the whole test. Answering early leaves its saved time for later questions.</div>
       <input type="text" inputMode="decimal" value={f.min} onChange={e => setF({ ...f, min: e.target.value })} />
       <div className="muted">How long should the student link stay active?</div>
       <div className="row" style={{ marginBottom: 10 }}>

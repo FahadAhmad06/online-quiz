@@ -13,6 +13,22 @@ export default function Test() {
   const [err, setErr] = useState(''), [saving, setSaving] = useState(false);
   const done = useRef(false);
 
+  // Resync with the server once on mount — it's the authority on idx/qEnd/answers, not sessionStorage.
+  // Guarded against a race: if the student already advanced (via next()/finish()) before this
+  // resolves, this snapshot is stale — applying it would snap the UI back to an earlier question.
+  useEffect(() => {
+    if (!T) return;
+    const attemptId = T.attemptId;
+    api('/attempts/' + attemptId).then(p => {
+      setT(current => {
+        if (!current || current.idx > p.idx) return current;
+        const merged = { ...current, idx: p.idx, answers: p.answers, qEnd: p.qEnd ? new Date(p.qEnd).getTime() : 0 };
+        save('qr_test', merged, sessionStorage);
+        return merged;
+      });
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!T?.perQ) return;
     const i = setInterval(() => setNow(Date.now()), 250);
@@ -20,21 +36,30 @@ export default function Test() {
   }, [!!T]);
 
   const update = t => { save('qr_test', t, sessionStorage); setT(t); };
+
+  // Shared time pool for the whole test: this ends it, from whatever question the student is on.
   const finish = async t => {
     if (done.current) return;
     done.current = true; setSaving(true); setErr('');
     try {
-      const r = await api('/attempts/' + t.attemptId + '/submit', { method: 'POST', body: { answers: t.answers } });
+      const r = await api('/attempts/' + t.attemptId + '/submit', { method: 'POST', body: { answer: t.answers[t.idx] } });
       save('qr_result', r, sessionStorage); sessionStorage.removeItem('qr_test'); navigate('/result');
     } catch (e) { done.current = false; setSaving(false); setErr(e.message); }
   };
-  const next = timeout => {
+
+  // Moving on early never resets or shortens the shared pool — only the actual time used is gone.
+  const next = async () => {
+    if (saving || done.current) return;
     if (T.idx >= T.run.length - 1) return finish(T);
-    const t = { ...T, idx: T.idx + 1 };
-    if (T.perQ) t.qEnd = timeout ? T.qEnd + T.perQ * 1000 : Date.now() + T.perQ * 1000;
-    update(t);
+    setSaving(true); setErr('');
+    try {
+      const r = await api('/attempts/' + T.attemptId + '/step', { method: 'PATCH', body: { idx: T.idx, answer: T.answers[T.idx] } });
+      update({ ...T, idx: r.idx, answers: r.answers, qEnd: r.qEnd ? new Date(r.qEnd).getTime() : 0 });
+    } catch (e) { setErr(e.message); }
+    setSaving(false);
   };
-  useEffect(() => { if (T && T.perQ && !done.current && !err && now >= T.qEnd) next(true); });
+  // The pool running out ends the whole test, not just the current question.
+  useEffect(() => { if (T && T.perQ && !done.current && !saving && !err && now >= T.qEnd) finish(T); });
   if (!T) return <Navigate to="/" replace />;
 
   const n = T.run.length, q = T.run[T.idx], sel = T.answers[T.idx], last = T.idx === n - 1;
@@ -44,7 +69,7 @@ export default function Test() {
       {T.perQ > 0 && (
         <div className="timers">
           <div className={'timer' + (r <= 10 ? ' low' : '')}>{clock(r)}</div>
-          <div className="muted">This question · {clock(r + T.perQ * (n - T.idx - 1))} left in total</div>
+          <div className="muted">left for the whole test</div>
         </div>
       )}
       <div className="muted">Question {T.idx + 1} of {n}</div>
@@ -56,8 +81,8 @@ export default function Test() {
           <span className="k">{optionLabel(i)}</span><span>{o}</span>
         </button>
       ))}
-      <p className="muted">{last ? 'This is the last question.' : 'Once you click Next, or the time runs out, you cannot come back to this question.'}</p>
-      <button onClick={() => next(false)} disabled={saving}>{saving ? 'Submitting…' : err ? 'Try submitting again' : last ? 'Finish test' : 'Next'}</button>
+      <p className="muted">{last ? 'This is the last question.' : 'Once you click Next, you cannot come back to this question. Time saved by answering early stays available for the rest of the test.'}</p>
+      <button onClick={() => (T.perQ && now >= T.qEnd ? finish(T) : next())} disabled={saving}>{saving ? 'Submitting…' : err ? 'Try submitting again' : last ? 'Finish test' : 'Next'}</button>
       <p className="err msg" role="alert">{err}</p>
     </div>
   );
