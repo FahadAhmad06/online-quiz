@@ -14,13 +14,13 @@ export default function StudentLogin() {
     return m || location.state?.msg || '';
   }), [busy, setBusy] = useState(false);
 
-  if (load('qr_student', null, sessionStorage)) return <Navigate to={sp.get('next') || '/'} replace />;
+  if (load('qr_student', null, sessionStorage)) return <Navigate to={sp.get('next') || '/dashboard'} replace />;
 
   const login = async () => {
     setBusy(true); setMsg('');
     try {
       save('qr_student', await api('/students/login', { method: 'POST', body: { rollNumber, password } }), sessionStorage);
-      navigate(sp.get('next') || '/');
+      navigate(sp.get('next') || '/dashboard');
     } catch (e) { setMsg(e.message); setBusy(false); }
   };
   return (

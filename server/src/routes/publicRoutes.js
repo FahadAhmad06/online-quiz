@@ -28,12 +28,13 @@ function assertOwns(attempt, req) {
 
 r.get('/papers/:code', asyncHandler(async (req, res) => {
   const p = await openPaper(req.params.code);
-  res.json({ code: p.code, title: p.title, perQ: p.perQ, count: p.questions.length, expiresAt: p.expiresAt });
+  res.json({ code: p.code, title: p.title, perQ: p.perQ, count: p.questions.length, startsAt: p.startsAt, expiresAt: p.expiresAt });
 }));
 
 r.post('/papers/:code/start', asyncHandler(async (req, res) => {
   if (!req.student) throw httpError(401, 'Please log in to start a test.');
   const p = await openPaper(req.params.code);
+  if (p.startsAt && Date.now() < new Date(p.startsAt).getTime()) throw httpError(403, 'This exam has not started yet.');
 
   const existing = await Attempt.findOne({ paperCode: p.code, student: req.student._id, preview: false }).sort({ attemptNumber: -1 });
   if (existing && !existing.submitted) return res.json(attemptPayload(existing, p)); // resume, unaffected by retakes
@@ -62,6 +63,18 @@ r.post('/papers/:code/start', asyncHandler(async (req, res) => {
   }
   if (grant) await RetakeGrant.updateOne({ _id: grant._id }, { attempt: attempt._id });
   res.json(attemptPayload(attempt, p));
+}));
+
+// A student's own history: their past results (by roll - Result has no student ref, matching
+// its existing shape) plus any attempt they started but haven't submitted yet (to resume).
+r.get('/me/overview', asyncHandler(async (req, res) => {
+  if (!req.student) throw httpError(401, 'Please log in.');
+  const results = await Result.find({ roll: req.student.rollNumber }).sort({ createdAt: -1 }).lean();
+  const inProgress = await Attempt.find({ student: req.student._id, preview: false, submitted: false })
+    .select('paperCode paperTitle startedAt').sort({ startedAt: -1 }).lean();
+  const completed = results.length;
+  const averagePercent = completed ? Math.round(results.reduce((s, r) => s + r.correct / r.total, 0) / completed * 100) : null;
+  res.json({ results, inProgress, completed, averagePercent, latest: results[0] || null });
 }));
 
 r.get('/attempts/:id', asyncHandler(async (req, res) => {

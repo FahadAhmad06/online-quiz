@@ -2,17 +2,24 @@ import { useState } from 'react';
 import QuestionBuilder from './QuestionBuilder';
 import UNIT from '../utils/units';
 export default function PaperForm({ onSubmit }) {
-  const [f, setF] = useState({ title: '', min: '1', shuf: true, dur: '24', unit: 'hours', never: false });
+  const [f, setF] = useState({ title: '', min: '1', shuf: true, dur: '24', unit: 'hours', never: false, schedule: false, startsAt: '' });
   const [questions, setQuestions] = useState([]), [msg, setMsg] = useState(''), [busy, setBusy] = useState(false);
   const submit = async () => {
     const min = parseFloat(f.min), dur = parseFloat(f.dur);
     if (!f.title.trim()) return setMsg('Give the paper a title.');
     if (isNaN(min) || min < 0 || min > 60) return setMsg('Minutes per question must be from 0 to 60.');
     if (!f.never && (isNaN(dur) || dur <= 0)) return setMsg('Enter how long the link stays active.');
+    if (f.schedule && !f.startsAt) return setMsg('Pick a start date and time, or turn scheduling off.');
     if (!questions.length) return setMsg('Add at least one question.');
     setBusy(true); setMsg('');
-    try { await onSubmit({ title: f.title.trim(), perQ: Math.round(min * 60), shuffle: f.shuf, durationMs: f.never ? null : dur * UNIT[f.unit], questions }); }
-    catch (e) { setMsg(e.message); setBusy(false); }
+    try {
+      await onSubmit({
+        title: f.title.trim(), perQ: Math.round(min * 60), shuffle: f.shuf,
+        durationMs: f.never ? null : dur * UNIT[f.unit],
+        startsAt: f.schedule && f.startsAt ? new Date(f.startsAt).toISOString() : null,
+        questions
+      });
+    } catch (e) { setMsg(e.message); setBusy(false); }
   };
   return (
     <div className="card">
@@ -28,6 +35,8 @@ export default function PaperForm({ onSubmit }) {
         <label className="chk" style={{ margin: 0 }}><input type="checkbox" checked={f.never} onChange={e => setF({ ...f, never: e.target.checked })} />Never expires</label>
       </div>
       <label className="chk"><input type="checkbox" checked={f.shuf} onChange={e => setF({ ...f, shuf: e.target.checked })} />Shuffle questions and options for each student</label>
+      <label className="chk"><input type="checkbox" checked={f.schedule} onChange={e => setF({ ...f, schedule: e.target.checked })} />Schedule a start time (students can't begin before this)</label>
+      {f.schedule && <input type="datetime-local" value={f.startsAt} onChange={e => setF({ ...f, startsAt: e.target.value })} />}
       <QuestionBuilder questions={questions} onChange={setQuestions} />
       <button onClick={submit} disabled={busy} style={{ marginTop: 8 }}>{busy ? 'Creating…' : 'Create paper and link'}</button>
       <p className="err msg">{msg}</p>

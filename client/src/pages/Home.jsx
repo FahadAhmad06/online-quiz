@@ -16,7 +16,7 @@ export default function Home() {
           onKeyDown={e => e.key === 'Enter' && open()} style={{ marginBottom: 0 }} />
         <div className="row" style={{ marginTop: 10 }}>
           <button onClick={open}>Open paper</button>
-          {!studentLoggedIn && <Link className="btn ghost" to="/student-login">Student Login</Link>}
+          {studentLoggedIn ? <Link className="btn ghost" to="/dashboard">My dashboard</Link> : <Link className="btn ghost" to="/student-login">Student Login</Link>}
         </div>
       </div>
       <Link className="big" to="/admin-login"><b>I am an Admin</b><span>Create papers, share links, see marks</span></Link>

@@ -68,12 +68,19 @@ export default function Test() {
     <div className="card">
       {T.perQ > 0 && (
         <div className="timers">
-          <div className={'timer' + (r <= 10 ? ' low' : '')}>{clock(r)}</div>
+          <div className={'timer' + (r <= 10 ? ' low' : r <= 60 ? ' warn' : '')}>{clock(r)}</div>
           <div className="muted">left for the whole test</div>
         </div>
       )}
       <div className="muted">Question {T.idx + 1} of {n}</div>
       <div className="bar"><i style={{ width: (T.idx + 1) / n * 100 + '%' }} /></div>
+      {n <= 50 && (
+        <div className="qpalette">
+          {T.run.map((_, i) => (
+            <span key={i} className={'qpill' + (i === T.idx ? ' current' : i < T.idx ? ' done' : '')} aria-label={'Question ' + (i + 1) + (i < T.idx ? ', answered' : i === T.idx ? ', current' : '')}>{i + 1}</span>
+          ))}
+        </div>
+      )}
       <h2>{q.text}</h2>
       {q.options.map((o, i) => (
         <button key={i} className={'opt' + (sel === i ? ' sel' : '')} disabled={saving}

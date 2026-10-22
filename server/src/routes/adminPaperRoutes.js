@@ -38,11 +38,13 @@ r.post('/papers', asyncHandler(async (req, res) => {
   if (!title || title.length > 120) throw httpError(400, 'Give the paper a title (up to 120 characters).');
   if (!Number.isFinite(perQ) || perQ < 0 || perQ > 3600) throw httpError(400, 'Time per question must be from 0 to 60 minutes.');
   if (dur !== null && (!Number.isFinite(dur) || dur <= 0)) throw httpError(400, 'Enter how long the link stays active.');
+  let startsAt = null;
+  if (b.startsAt) { startsAt = new Date(b.startsAt); if (isNaN(startsAt)) throw httpError(400, 'Invalid start time.'); }
   const qErr = validateQuestions(b.questions);
   if (qErr) throw httpError(400, qErr);
   const paper = await Paper.create({
     code: await generateCode(), title, perQ: Math.round(perQ), shuffle: b.shuffle !== false,
-    expiresAt: dur === null ? null : new Date(Date.now() + dur), createdBy: req.admin.email,
+    startsAt, expiresAt: dur === null ? null : new Date(Date.now() + dur), createdBy: req.admin.email,
     questions: b.questions.map(q => ({ text: q.text.trim(), options: q.options.map(o => o.trim()), correct: q.correct }))
   });
   res.status(201).json(paperSummary(paper.toObject()));
@@ -71,6 +73,18 @@ r.post('/papers/:id/reopen', asyncHandler(async (req, res) => {
   const p = await findPaper(req.params.id), ms = Number(req.body?.ms) || DAY;
   if (ms <= 0 || ms > 365 * DAY) throw httpError(400, 'Invalid duration.');
   p.expiresAt = new Date(Date.now() + ms); await p.save(); res.json(paperSummary(p.toObject()));
+}));
+
+// Setting/clearing the scheduled start is blocked once a real (non-preview) attempt exists,
+// so the deadline a student is already relying on can't be moved out from under them.
+r.post('/papers/:id/schedule', asyncHandler(async (req, res) => {
+  const p = await findPaper(req.params.id);
+  if (await Attempt.exists({ paperCode: p.code, preview: false })) {
+    throw httpError(400, 'Students have already started this paper; its start time can no longer be changed.');
+  }
+  let startsAt = null;
+  if (req.body?.startsAt) { startsAt = new Date(req.body.startsAt); if (isNaN(startsAt)) throw httpError(400, 'Invalid start time.'); }
+  p.startsAt = startsAt; await p.save(); res.json(paperSummary(p.toObject()));
 }));
 
 r.post('/papers/:id/preview', asyncHandler(async (req, res) => {
