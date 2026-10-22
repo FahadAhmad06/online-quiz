@@ -51,11 +51,17 @@ r.post('/papers/:code/start', asyncHandler(async (req, res) => {
   }
 
   const run = buildRun(p.questions, p.shuffle);
+  // A first attempt on a scheduled paper shares the paper's fixed window (see newAttemptFields).
+  const fields = newAttemptFields(p, run, { fromSchedule: attemptNumber === 1 });
+  if (fields.qEnd && fields.qEnd.getTime() <= Date.now()) {
+    if (grant) await RetakeGrant.updateOne({ _id: grant._id }, { used: false, usedAt: null });
+    throw httpError(403, 'The scheduled time for this exam has already ended.');
+  }
   let attempt;
   try {
     attempt = await Attempt.create({
       paperCode: p.code, paperTitle: p.title, name: req.student.name, roll: req.student.rollNumber,
-      student: req.student._id, run, attemptNumber, ...newAttemptFields(p, run)
+      student: req.student._id, run, attemptNumber, ...fields
     });
   } catch (e) {
     if (grant) await RetakeGrant.updateOne({ _id: grant._id }, { used: false, usedAt: null }); // roll back the claim
@@ -84,22 +90,57 @@ r.get('/attempts/:id', asyncHandler(async (req, res) => {
   res.json(attemptPayload(a, { perQ: a.perQ }));
 }));
 
-r.patch('/attempts/:id/step', asyncHandler(async (req, res) => {
+// Strict sequential navigation: a.idx is the only question that can be answered. Everything
+// before it is locked (answered or skipped), everything after it is unreachable until Next.
+// Requests naming any other index are rejected with the authoritative state so the client resyncs.
+const progress = a => ({ idx: a.idx, qEnd: a.qEnd, answers: a.answers, serverNow: Date.now() });
+async function openAttempt(req) {
   const a = await Attempt.findOne({ _id: req.params.id, submitted: false });
   if (!a) throw httpError(409, 'This test was already submitted or does not exist.');
   assertOwns(a, req);
+  return a;
+}
+function rejectStale(a, idx, res) {
+  if (idx === a.idx) return false;
+  res.status(409).json({ error: idx < a.idx ? 'That question is locked and can no longer be changed.' : 'You cannot skip ahead to that question.', ...progress(a) });
+  return true;
+}
+const validAnswer = (a, answer) => Number.isInteger(answer) && answer >= -1 && answer < a.run[a.idx].options.length;
+// A concurrent request moved the attempt on (or submitted it) between our read and write.
+async function conflict(id, res) {
+  const cur = await Attempt.findById(id);
+  if (!cur || cur.submitted) throw httpError(409, 'This test was already submitted or does not exist.');
+  res.status(409).json({ error: 'That question is locked and can no longer be changed.', ...progress(cur) });
+}
 
+// Autosave the current question's selection without advancing, so a refresh or closed browser
+// keeps it. Atomic on idx: a save racing a Next that already moved on can't touch a locked question.
+r.patch('/attempts/:id/answer', asyncHandler(async (req, res) => {
+  const a = await openAttempt(req);
   const { idx, answer } = req.body || {};
-  if (idx !== a.idx) return res.json({ idx: a.idx, qEnd: a.qEnd, answers: a.answers }); // stale client; resync
+  if (rejectStale(a, idx, res)) return;
   if (a.qEnd && Date.now() >= a.qEnd.getTime()) throw httpError(400, 'Time is up; submit the test instead.');
+  if (!validAnswer(a, answer)) throw httpError(400, 'Invalid option.');
+  const saved = await Attempt.findOneAndUpdate({ _id: a._id, submitted: false, idx }, { [`answers.${idx}`]: answer }, { new: true });
+  if (!saved) return conflict(a._id, res);
+  res.json(progress(saved));
+}));
+
+r.patch('/attempts/:id/step', asyncHandler(async (req, res) => {
+  const a = await openAttempt(req);
+  const { idx, answer } = req.body || {};
+  if (rejectStale(a, idx, res)) return;
+  if (a.qEnd && Date.now() >= a.qEnd.getTime()) throw httpError(400, 'Time is up; submit the test instead.');
+  if (idx >= a.run.length - 1) throw httpError(400, 'This is the last question; submit the test instead.');
 
   // Shared time pool: qEnd is the whole test's deadline, set once at start and never reset here —
   // answering a question early simply leaves its unused time for the rest of the test.
-  if (Number.isInteger(answer) && answer >= 0 && answer < a.run[idx].options.length) a.answers[idx] = answer;
-  if (idx >= a.run.length - 1) throw httpError(400, 'This is the last question; submit the test instead.');
-  a.idx += 1;
-  await a.save();
-  res.json({ idx: a.idx, qEnd: a.qEnd, answers: a.answers });
+  // Atomic on idx so a duplicate/out-of-order Next can never advance twice or skip a question.
+  const update = { $inc: { idx: 1 } };
+  if (validAnswer(a, answer)) update.$set = { [`answers.${idx}`]: answer };
+  const moved = await Attempt.findOneAndUpdate({ _id: a._id, submitted: false, idx }, update, { new: true });
+  if (!moved) return conflict(a._id, res);
+  res.json(progress(moved));
 }));
 
 r.post('/attempts/:id/submit', asyncHandler(async (req, res) => {
@@ -108,12 +149,13 @@ r.post('/attempts/:id/submit', asyncHandler(async (req, res) => {
   assertOwns(a, req);
 
   const { answer } = req.body || {};
-  const update = { submitted: true };
+  // Atomic: an attempt can be submitted only once. The final answer only lands on the question
+  // that is still current (idx in the filter), never on one a concurrent Next already locked.
+  let claimed = null;
   if (Number.isInteger(answer) && answer >= 0 && answer < a.run[a.idx].options.length && (!a.qEnd || Date.now() < a.qEnd.getTime())) {
-    update[`answers.${a.idx}`] = answer;
+    claimed = await Attempt.findOneAndUpdate({ _id: a._id, submitted: false, idx: a.idx }, { submitted: true, [`answers.${a.idx}`]: answer }, { new: true }).lean();
   }
-  // Atomic: an attempt can be submitted only once.
-  const claimed = await Attempt.findOneAndUpdate({ _id: a._id, submitted: false }, update, { new: true }).lean();
+  if (!claimed) claimed = await Attempt.findOneAndUpdate({ _id: a._id, submitted: false }, { submitted: true }, { new: true }).lean();
   if (!claimed) throw httpError(409, 'This test was already submitted or does not exist.');
 
   const correct = claimed.run.filter((q, i) => claimed.answers[i] === q.correct).length;

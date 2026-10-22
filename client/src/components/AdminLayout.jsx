@@ -1,48 +1,91 @@
-import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import load from '../utils/load';
+import Icon from './Icon';
+import GlobalSearch from './GlobalSearch';
+import useOutside from '../hooks/useOutside';
 
-const icon = {
-  dashboard: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></svg>,
-  papers: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></svg>,
-  results: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19V10M12 19V5M20 19v-7" /></svg>,
-  students: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="8" r="3.2" /><path d="M2.5 20c.6-3.6 3.2-5.6 6.5-5.6s5.9 2 6.5 5.6M16.5 8.2a3 3 0 1 1 3 3M16 14c2.6.3 4.4 1.9 4.9 5" /></svg>,
-  admins: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3 4 6v6c0 4.4 3.4 7.6 8 9 4.6-1.4 8-4.6 8-9V6l-8-3Z" /><path d="m9 12 2 2 4-4" /></svg>,
-  menu: <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M4 12h16M4 17h16" /></svg>,
-  close: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6 6 18" /></svg>
-};
-
-const links = [
-  { to: '/admin', end: true, label: 'Dashboard', icon: 'dashboard' },
-  { to: '/admin/papers', label: 'Papers', icon: 'papers' },
-  { to: '/admin/results', label: 'Results', icon: 'results' },
-  { to: '/admin/rolls', label: 'Students', icon: 'students' }
+// Every link points at a working page; Settings shows admin management only to the owner.
+const nav = [
+  { to: '/admin', end: true, label: 'Dashboard', icon: 'home' },
+  { label: 'Manage Quizzes', icon: 'quiz', base: '/admin/papers', children: [
+    { to: '/admin/papers', end: true, label: 'All quizzes' },
+    { to: '/admin/papers/new', label: 'Create quiz' }
+  ] },
+  { to: '/admin/students', label: 'Students', icon: 'students' },
+  { to: '/admin/rolls', label: 'Roll & PIN Management', icon: 'key' },
+  { to: '/admin/results', label: 'Reports', icon: 'chart' },
+  { to: '/admin/schedule', label: 'Paper Schedule', icon: 'calendar' },
+  { to: '/admin/retakes', label: 'Retake Requests', icon: 'retake' },
+  { to: '/admin/settings', label: 'Settings', icon: 'settings' }
 ];
 
-export default function AdminLayout() {
-  const s = load('qr_admin', null, sessionStorage), navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+function NavGroup({ item, pathname }) {
+  const inside = pathname.startsWith(item.base);
+  const [open, setOpen] = useState(inside);
+  useEffect(() => { if (inside) setOpen(true); }, [inside]);
+  return (
+    <div className={'navgroup' + (open ? ' open' : '')}>
+      <button type="button" className={inside ? 'active-parent' : ''} aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <span className="icon"><Icon name={item.icon} size={20} /></span>{item.label}<Icon name="chevronRight" size={16} className="chev" />
+      </button>
+      {open && <div className="subnav">{item.children.map(c => <NavLink key={c.to} to={c.to} end={c.end}>{c.label}</NavLink>)}</div>}
+    </div>
+  );
+}
+
+export default function AdminLayout({ theme, onToggleTheme }) {
+  const s = load('qr_admin', null, sessionStorage), navigate = useNavigate(), { pathname } = useLocation();
+  const [open, setOpen] = useState(false), [menu, setMenu] = useState(false), prof = useRef(null);
+  useOutside(prof, () => setMenu(false), menu);
+  useEffect(() => { setOpen(false); setMenu(false); }, [pathname]);
   const logout = () => { sessionStorage.removeItem('qr_admin'); navigate('/'); };
+  const name = (s?.email || 'admin').split('@')[0];
 
   return (
-    <div className="shell">
-      {open && <div className="sidebar-backdrop open" onClick={() => setOpen(false)} />}
-      <nav className={'sidebar' + (open ? ' open' : '')} onClick={() => setOpen(false)}>
-        <h3 style={{ padding: '6px 12px' }}>Admin panel</h3>
-        {links.map(l => (
-          <NavLink key={l.to} to={l.to} end={l.end}><span className="icon">{icon[l.icon]}</span>{l.label}</NavLink>
-        ))}
-        {s.isSuper && <NavLink to="/admin/admins"><span className="icon">{icon.admins}</span>Admins</NavLink>}
-      </nav>
-      <div className="shell-main">
+    <div className="admin">
+      <div className={'sidebar-backdrop' + (open ? ' open' : '')} onClick={() => setOpen(false)} />
+      <aside className={'sidebar' + (open ? ' open' : '')} aria-label="Admin navigation">
+        <Link to="/admin" className="brand">
+          <span className="mark"><Icon name="cap" size={22} /></span>
+          <span><b>QuizRoom</b><small>Learn • Test • Grow</small></span>
+        </Link>
+        <nav className="navlist">
+          {nav.map(item => item.children
+            ? <NavGroup key={item.label} item={item} pathname={pathname} />
+            : <NavLink key={item.to} to={item.to} end={item.end} className="navitem"><span className="icon"><Icon name={item.icon} size={20} /></span>{item.label}</NavLink>)}
+          <div className="navsep" />
+          <button type="button" className="navitem" onClick={logout}><span className="icon"><Icon name="logout" size={20} /></span>Log out</button>
+        </nav>
+        <div className="sidecard">
+          <b>Fair, secure exams</b>
+          <p>Questions lock after Next and the timer follows the paper's schedule, enforced on the server.</p>
+        </div>
+      </aside>
+
+      <div className="admin-main">
         <div className="topbar">
-          <button className="menu-btn ghost small" onClick={() => setOpen(o => !o)} aria-label="Toggle menu">{icon.menu}</button>
-          <div className="row" style={{ marginLeft: 'auto' }}>
-            <span className="muted">{s.email}</span>
-            <button className="ghost small" onClick={logout}>Log out</button>
+          <button className="icon-btn menu-btn" onClick={() => setOpen(o => !o)} aria-label="Open menu"><Icon name="menu" size={20} /></button>
+          <div className="grow"><GlobalSearch /></div>
+          <button className="icon-btn" onClick={onToggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} />
+          </button>
+          <div className="profile" ref={prof}>
+            <button onClick={() => setMenu(m => !m)} aria-haspopup="menu" aria-expanded={menu}>
+              <span className="avatar">{name[0]?.toUpperCase()}</span>
+              <span className="who"><b>{name}</b><small>{s?.isSuper ? 'Owner' : 'Administrator'}</small></span>
+              <Icon name="chevronDown" size={16} />
+            </button>
+            {menu && (
+              <div className="popover right" role="menu">
+                <div className="empty-row" style={{ paddingBottom: 6 }}><b style={{ color: 'var(--ink)' }}>{s?.email}</b><br />{s?.isSuper ? 'Owner' : 'Administrator'}</div>
+                <Link to="/admin/settings" role="menuitem"><Icon name="settings" size={16} />Account settings</Link>
+                <button className="item" role="menuitem" onClick={logout}><Icon name="logout" size={16} />Log out</button>
+              </div>
+            )}
           </div>
         </div>
-        <Outlet />
+        <div className="admin-content"><Outlet context={{ theme, onToggleTheme }} /></div>
       </div>
     </div>
   );

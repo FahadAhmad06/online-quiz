@@ -2,6 +2,8 @@ import { Router } from 'express';
 import Paper from '../models/Paper.js';
 import Result from '../models/Result.js';
 import Attempt from '../models/Attempt.js';
+import Student from '../models/Student.js';
+import RetakeGrant from '../models/RetakeGrant.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import httpError from '../utils/httpError.js';
 import isOpen from '../utils/isOpen.js';
@@ -15,12 +17,82 @@ import attemptPayload from '../utils/attemptPayload.js';
 import newAttemptFields from '../utils/newAttemptFields.js';
 
 const r = Router(), DAY = 86400000;
+const validTz = tz => { try { return new Intl.DateTimeFormat('en', { timeZone: String(tz || 'UTC') }).resolvedOptions().timeZone; } catch { return 'UTC'; } };
 const findPaper = async id => { const p = await Paper.findById(id); if (!p) throw httpError(404, 'Paper not found'); return p; };
 
+// Dashboard data. Every number is counted from the database; the *Recent fields are real
+// "created in the last 30 days" counts, not estimated trends.
 r.get('/stats', asyncHandler(async (req, res) => {
-  const [papers, results] = await Promise.all([Paper.find().select('expiresAt').lean(), Result.find().lean()]);
+  const tz = validTz(req.query.tz), now = Date.now(), since30 = new Date(now - 30 * DAY), since14 = new Date(now - 13 * DAY);
+  since14.setUTCHours(0, 0, 0, 0);
+  const [papers, results, students, studentsRecent, pendingRetakes, trend, recentStudents, recentGrants] = await Promise.all([
+    Paper.find().select('-questions.options -questions.correct').lean(),
+    Result.find().lean(),
+    Student.countDocuments(),
+    Student.countDocuments({ createdAt: { $gte: since30 } }),
+    RetakeGrant.countDocuments({ used: false, cancelled: false }),
+    Result.aggregate([
+      { $match: { createdAt: { $gte: since14 } } },
+      { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: tz } },
+          submissions: { $sum: 1 },
+          avg: { $avg: { $cond: [{ $gt: ['$total', 0] }, { $divide: ['$correct', '$total'] }, 0] } }
+      } }
+    ]),
+    Student.find().select('name rollNumber createdAt').sort({ createdAt: -1 }).limit(6).lean(),
+    RetakeGrant.find().select('rollNumber paperCode used cancelled grantedBy updatedAt').sort({ updatedAt: -1 }).limit(6).lean()
+  ]);
   const latest = rankResults(results).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
-  res.json({ papers: papers.length, active: papers.filter(isOpen).length, submissions: results.length, latest });
+  const by = Object.fromEntries(trend.map(t => [t._id, t]));
+  const days = [...Array(14)].map((_, i) => {
+    const key = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(now - (13 - i) * DAY)); // YYYY-MM-DD
+    return { day: key, submissions: by[key]?.submissions || 0, averagePercent: by[key] ? Math.round(by[key].avg * 100) : null };
+  });
+  const buckets = [[0, 49], [50, 69], [70, 89], [90, 100]].map(([lo, hi]) => ({
+    label: lo + '–' + hi + '%', count: results.filter(x => { const p = x.total ? Math.round(x.correct / x.total * 100) : 0; return p >= lo && p <= hi; }).length
+  }));
+  const titles = Object.fromEntries(papers.map(p => [p.code, p.title]));
+  const activity = [
+    ...recentStudents.map(s => ({ type: 'student', at: s.createdAt, title: 'New student registered', detail: s.name + ' (Roll: ' + s.rollNumber + ')' })),
+    ...latest.map(x => ({ type: 'result', at: x.createdAt, title: 'Quiz completed', detail: x.paperTitle + ' by ' + x.name + ' · ' + x.correct + '/' + x.total })),
+    ...[...papers].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 6)
+      .map(p => ({ type: 'paper', at: p.createdAt, title: 'New quiz created', detail: p.title + ' (' + p.code + ')', paperId: p._id })),
+    ...recentGrants.map(g => ({
+      type: 'retake', at: g.updatedAt,
+      title: g.cancelled ? 'Retake cancelled' : g.used ? 'Retake started' : 'Retake allowed',
+      detail: (titles[g.paperCode] || g.paperCode) + ' · Roll ' + g.rollNumber
+    }))
+  ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 8);
+  const upcoming = papers.map(p => paperSummary(p))
+    .filter(p => p.status === 'scheduled' || p.status === 'active')
+    .sort((a, b) => (a.status === 'scheduled' ? 0 : 1) - (b.status === 'scheduled' ? 0 : 1)
+      || (a.status === 'scheduled' ? new Date(a.startsAt) - new Date(b.startsAt) : new Date(b.createdAt) - new Date(a.createdAt)))
+    .slice(0, 6);
+  res.json({
+    papers: papers.length, active: papers.filter(isOpen).length, submissions: results.length, latest,
+    students, pendingRetakes,
+    papersRecent: papers.filter(p => new Date(p.createdAt) >= since30).length,
+    submissionsRecent: results.filter(x => new Date(x.createdAt) >= since30).length,
+    studentsRecent, days, buckets, activity, upcoming
+  });
+}));
+
+// Edit a paper's content and settings. Like /schedule, blocked once a real student has started
+// or submitted it, so no one's questions or deadline change mid-exam or after grading.
+r.patch('/papers/:id', asyncHandler(async (req, res) => {
+  const p = await findPaper(req.params.id), b = req.body || {};
+  if (await Attempt.exists({ paperCode: p.code, preview: false }) || await Result.exists({ paperCode: p.code })) {
+    throw httpError(400, 'Students have already taken this paper; its questions and timing can no longer be edited.');
+  }
+  const title = String(b.title || '').trim(), perQ = Number(b.perQ);
+  if (!title || title.length > 120) throw httpError(400, 'Give the paper a title (up to 120 characters).');
+  if (!Number.isFinite(perQ) || perQ < 0 || perQ > 3600) throw httpError(400, 'Time per question must be from 0 to 60 minutes.');
+  const qErr = validateQuestions(b.questions);
+  if (qErr) throw httpError(400, qErr);
+  p.title = title; p.perQ = Math.round(perQ); p.shuffle = b.shuffle !== false;
+  p.questions = b.questions.map(q => ({ text: q.text.trim(), options: q.options.map(o => o.trim()), correct: q.correct }));
+  await p.save();
+  res.json(paperSummary(p.toObject()));
 }));
 
 r.get('/papers', asyncHandler(async (req, res) => {

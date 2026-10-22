@@ -1,1 +1,3 @@
-export default function Loading() { return <p className="muted" role="status">Loading…</p>; }
+export default function Loading({ label = 'Loading…' }) {
+  return <div className="loading" role="status"><span className="spinner" />{label}</div>;
+}

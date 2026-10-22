@@ -13,11 +13,11 @@ function EyeOffIcon() {
 
 // Same bare <input> this app already uses, plus a show/hide toggle. Visibility is purely a
 // frontend display change: the value, validation, and what gets sent to the server never differ.
-export default function PasswordField({ value, onChange, placeholder, onKeyDown, autoComplete }) {
+export default function PasswordField({ id, value, onChange, placeholder, onKeyDown, autoComplete }) {
   const [show, setShow] = useState(false);
   return (
     <div className="pwrap">
-      <input type={show ? 'text' : 'password'} placeholder={placeholder} value={value} onChange={onChange}
+      <input id={id} type={show ? 'text' : 'password'} placeholder={placeholder} value={value} onChange={onChange}
         onKeyDown={onKeyDown} autoComplete={autoComplete} />
       <button type="button" className="eye" aria-label={show ? 'Hide password' : 'Show password'}
         onClick={() => setShow(s => !s)}>

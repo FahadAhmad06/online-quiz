@@ -4,17 +4,22 @@ import save from './save';
 export default async function api(path, { method = 'GET', body } = {}) {
   const key = path.startsWith('/admin') ? 'qr_admin' : 'qr_student'; // papers/attempts routes also carry the student token
   const s = load(key, null, sessionStorage);
-  const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api' + path, {
-    method,
-    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(s?.token ? { Authorization: 'Bearer ' + s.token } : {}) },
-    body: body ? JSON.stringify(body) : undefined
-  });
+  let res;
+  try {
+    res = await fetch((import.meta.env.VITE_API_URL || '') + '/api' + path, {
+      method,
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(s?.token ? { Authorization: 'Bearer ' + s.token } : {}) },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  } catch {
+    const e = new Error('Network error. Check your connection and try again.'); e.status = 0; throw e;
+  }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && s) {
     sessionStorage.removeItem(key);
     if (key === 'qr_student') save('qr_student_msg', data.error || 'Please log in again.', sessionStorage);
     location.assign(key === 'qr_admin' ? '/admin-login' : '/student-login');
   }
-  if (!res.ok) { const e = new Error(data.error || 'Something went wrong. Try again.'); e.status = res.status; throw e; }
+  if (!res.ok) { const e = new Error(data.error || 'Something went wrong. Try again.'); e.status = res.status; e.data = data; throw e; }
   return data;
 }
