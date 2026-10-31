@@ -3,6 +3,7 @@ import Paper from '../models/Paper.js';
 import Result from '../models/Result.js';
 import Attempt from '../models/Attempt.js';
 import Student from '../models/Student.js';
+import AllowedRollNumber from '../models/AllowedRollNumber.js';
 import RetakeGrant from '../models/RetakeGrant.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import httpError from '../utils/httpError.js';
@@ -15,37 +16,72 @@ import paperSummary from '../utils/paperSummary.js';
 import buildRun from '../utils/buildRun.js';
 import attemptPayload from '../utils/attemptPayload.js';
 import newAttemptFields from '../utils/newAttemptFields.js';
+import { ownerFilter, adminObjectId, isOwner } from '../utils/adminFilter.js';
+import Admin from '../models/Admin.js';
+import displayName from '../utils/displayName.js';
 
 const r = Router(), DAY = 86400000;
+const cleanQuestion = q => q.type === 'subjective'
+  ? { type: 'subjective', text: q.text.trim(), maxMarks: q.maxMarks, instructions: (q.instructions || '').trim(),
+      rubric: (q.rubric || '').trim(), keyConcepts: (q.keyConcepts || []).map(k => k.trim()).filter(Boolean), modelAnswer: (q.modelAnswer || '').trim() }
+  : { type: 'mcq', text: q.text.trim(), options: q.options.map(o => o.trim()), correct: q.correct };
 const validTz = tz => { try { return new Intl.DateTimeFormat('en', { timeZone: String(tz || 'UTC') }).resolvedOptions().timeZone; } catch { return 'UTC'; } };
-const findPaper = async id => { const p = await Paper.findById(id); if (!p) throw httpError(404, 'Paper not found'); return p; };
+
+// Find a paper by ID, then verify the requesting admin owns it (or is super).
+const findPaper = async (id, req) => {
+  const p = await Paper.findById(id);
+  if (!p) throw httpError(404, 'Paper not found');
+  if (!isOwner(req, p)) throw httpError(403, 'You do not have permission to access this paper.');
+  return p;
+};
 
 // Dashboard data. Every number is counted from the database; the *Recent fields are real
 // "created in the last 30 days" counts, not estimated trends.
+// All statistics are scoped to the authenticated admin's own papers/results.
 r.get('/stats', asyncHandler(async (req, res) => {
   const tz = validTz(req.query.tz), now = Date.now(), since30 = new Date(now - 30 * DAY), since14 = new Date(now - 13 * DAY);
   since14.setUTCHours(0, 0, 0, 0);
-  const [papers, results, students, studentsRecent, pendingRetakes, trend, recentStudents, recentGrants] = await Promise.all([
-    Paper.find().select('-questions.options -questions.correct').lean(),
-    Result.find().lean(),
-    Student.countDocuments(),
-    Student.countDocuments({ createdAt: { $gte: since30 } }),
-    RetakeGrant.countDocuments({ used: false, cancelled: false }),
+  const of = ownerFilter(req);
+
+  // Fetch admin's own papers first; use paper codes to scope results/attempts.
+  const papers = await Paper.find(of).select('-questions.options -questions.correct').lean();
+  const myCodes = papers.map(p => p.code);
+  const codeFilter = req.admin.isSuper ? {} : { paperCode: { $in: myCodes } };
+
+  // For regular admins, get the roll numbers they manage to determine "their" students.
+  let myRollNumbers = null;
+  if (!req.admin.isSuper) {
+    const rolls = await AllowedRollNumber.find(of).select('rollNumber').lean();
+    myRollNumbers = rolls.map(r => r.rollNumber);
+  }
+
+  const studentFilter = myRollNumbers !== null ? { rollNumber: { $in: myRollNumbers } } : {};
+  const studentRecentFilter = myRollNumbers !== null ? { rollNumber: { $in: myRollNumbers }, createdAt: { $gte: since30 } } : { createdAt: { $gte: since30 } };
+
+  const [results, studentsTotal, studentsRecent, pendingRetakes, trend, recentGrants] = await Promise.all([
+    Result.find(codeFilter).lean(),
+    Student.countDocuments(studentFilter),
+    Student.countDocuments(studentRecentFilter),
+    RetakeGrant.countDocuments({ ...codeFilter, used: false, cancelled: false }),
     Result.aggregate([
-      { $match: { createdAt: { $gte: since14 } } },
+      { $match: { ...codeFilter, createdAt: { $gte: since14 } } },
       { $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: tz } },
           submissions: { $sum: 1 },
           avg: { $avg: { $cond: [{ $gt: ['$total', 0] }, { $divide: ['$correct', '$total'] }, 0] } }
       } }
     ]),
-    Student.find().select('name rollNumber createdAt').sort({ createdAt: -1 }).limit(6).lean(),
-    RetakeGrant.find().select('rollNumber paperCode used cancelled grantedBy updatedAt').sort({ updatedAt: -1 }).limit(6).lean()
+    RetakeGrant.find(codeFilter).select('rollNumber paperCode used cancelled grantedBy updatedAt').sort({ updatedAt: -1 }).limit(6).lean()
   ]);
+
+  const recentStudents = myRollNumbers !== null
+    ? await Student.find({ rollNumber: { $in: myRollNumbers } }).select('name rollNumber createdAt').sort({ createdAt: -1 }).limit(6).lean()
+    : await Student.find().select('name rollNumber createdAt').sort({ createdAt: -1 }).limit(6).lean();
+
   const latest = rankResults(results).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
   const by = Object.fromEntries(trend.map(t => [t._id, t]));
   const days = [...Array(14)].map((_, i) => {
-    const key = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(now - (13 - i) * DAY)); // YYYY-MM-DD
+    const key = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(now - (13 - i) * DAY));
     return { day: key, submissions: by[key]?.submissions || 0, averagePercent: by[key] ? Math.round(by[key].avg * 100) : null };
   });
   const buckets = [[0, 49], [50, 69], [70, 89], [90, 100]].map(([lo, hi]) => ({
@@ -70,7 +106,7 @@ r.get('/stats', asyncHandler(async (req, res) => {
     .slice(0, 6);
   res.json({
     papers: papers.length, active: papers.filter(isOpen).length, submissions: results.length, latest,
-    students, pendingRetakes,
+    students: studentsTotal, pendingRetakes,
     papersRecent: papers.filter(p => new Date(p.createdAt) >= since30).length,
     submissionsRecent: results.filter(x => new Date(x.createdAt) >= since30).length,
     studentsRecent, days, buckets, activity, upcoming
@@ -80,7 +116,7 @@ r.get('/stats', asyncHandler(async (req, res) => {
 // Edit a paper's content and settings. Like /schedule, blocked once a real student has started
 // or submitted it, so no one's questions or deadline change mid-exam or after grading.
 r.patch('/papers/:id', asyncHandler(async (req, res) => {
-  const p = await findPaper(req.params.id), b = req.body || {};
+  const p = await findPaper(req.params.id, req), b = req.body || {};
   if (await Attempt.exists({ paperCode: p.code, preview: false }) || await Result.exists({ paperCode: p.code })) {
     throw httpError(400, 'Students have already taken this paper; its questions and timing can no longer be edited.');
   }
@@ -90,17 +126,24 @@ r.patch('/papers/:id', asyncHandler(async (req, res) => {
   const qErr = validateQuestions(b.questions);
   if (qErr) throw httpError(400, qErr);
   p.title = title; p.perQ = Math.round(perQ); p.shuffle = b.shuffle !== false;
-  p.questions = b.questions.map(q => ({ text: q.text.trim(), options: q.options.map(o => o.trim()), correct: q.correct }));
+  p.questions = b.questions.map(cleanQuestion);
   await p.save();
   res.json(paperSummary(p.toObject()));
 }));
 
 r.get('/papers', asyncHandler(async (req, res) => {
+  const of = ownerFilter(req);
   const [papers, counts] = await Promise.all([
-    Paper.find().sort({ createdAt: -1 }).lean(),
-    Result.aggregate([{ $group: { _id: '$paperCode', n: { $sum: 1 } } }])
+    Paper.find(of).sort({ createdAt: -1 }).lean(),
+    Result.aggregate([
+      ...(req.admin.isSuper ? [] : [{ $match: { adminId: { $in: [null, ...[]] } } }]),
+      { $group: { _id: '$paperCode', n: { $sum: 1 } } }
+    ])
   ]);
-  const by = Object.fromEntries(counts.map(c => [c._id, c.n]));
+  // Re-derive result counts scoped to admin's own papers for the list view.
+  const myCodes = new Set(papers.map(p => p.code));
+  const allCounts = await Result.aggregate([{ $group: { _id: '$paperCode', n: { $sum: 1 } } }]);
+  const by = Object.fromEntries(allCounts.filter(c => myCodes.has(c._id)).map(c => [c._id, c.n]));
   res.json(papers.map(p => paperSummary(p, by[p.code] || 0)));
 }));
 
@@ -117,19 +160,43 @@ r.post('/papers', asyncHandler(async (req, res) => {
   const paper = await Paper.create({
     code: await generateCode(), title, perQ: Math.round(perQ), shuffle: b.shuffle !== false,
     startsAt, expiresAt: dur === null ? null : new Date(Date.now() + dur), createdBy: req.admin.email,
-    questions: b.questions.map(q => ({ text: q.text.trim(), options: q.options.map(o => o.trim()), correct: q.correct }))
+    adminId: adminObjectId(req), // always set from the verified JWT, never from the request body
+    questions: b.questions.map(cleanQuestion)
   });
   res.status(201).json(paperSummary(paper.toObject()));
 }));
 
+// Only joins to Attempt (for the per-student subjective evaluation breakdown) when the paper
+// actually has subjective questions - a plain MCQ quiz, the common case, skips that query entirely.
 r.get('/papers/:id', asyncHandler(async (req, res) => {
-  const p = (await findPaper(req.params.id)).toObject();
+  const p = (await findPaper(req.params.id, req)).toObject();
   const results = rankResults(await Result.find({ paperCode: p.code }).lean());
-  res.json({ paper: { ...paperSummary(p, results.length), questions: p.questions }, results, stats: paperStats(results) });
+  const hasSubjective = p.questions.some(q => q.type === 'subjective');
+  let withEval = results;
+  if (hasSubjective) {
+    const attemptIds = results.map(r => r.attempt).filter(Boolean);
+    const attempts = attemptIds.length ? await Attempt.find({ _id: { $in: attemptIds } }).select('evaluations').lean() : [];
+    const byAttempt = new Map(attempts.map(a => {
+      const evs = a.evaluations || [];
+      return [String(a._id), {
+        subjectiveTotal: evs.length,
+        subjectiveApproved: evs.filter(e => e.status === 'approved').length,
+        subjectivePending: evs.filter(e => ['pending', 'evaluating', 'awaiting_review'].includes(e.status)).length,
+        subjectiveManualReview: evs.filter(e => e.status === 'manual_review').length,
+        subjectiveFailed: evs.filter(e => e.status === 'failed').length
+      }];
+    }));
+    withEval = results.map(r => ({ ...r, subjective: r.attempt ? byAttempt.get(String(r.attempt)) || null : null }));
+  }
+  const creator = p.adminId ? await Admin.findById(p.adminId).select('name email').lean() : null;
+  res.json({
+    paper: { ...paperSummary(p, results.length), questions: p.questions, createdByName: creator ? displayName(creator) : null },
+    results: withEval, stats: paperStats(results)
+  });
 }));
 
 r.post('/papers/:id/extend', asyncHandler(async (req, res) => {
-  const p = await findPaper(req.params.id), ms = Number(req.body?.ms);
+  const p = await findPaper(req.params.id, req), ms = Number(req.body?.ms);
   if (!p.expiresAt) throw httpError(400, 'This link never expires.');
   if (!Number.isFinite(ms) || ms <= 0 || ms > 365 * DAY) throw httpError(400, 'Invalid extension.');
   p.expiresAt = new Date(Math.max(Date.now(), p.expiresAt.getTime()) + ms);
@@ -137,12 +204,12 @@ r.post('/papers/:id/extend', asyncHandler(async (req, res) => {
 }));
 
 r.post('/papers/:id/close', asyncHandler(async (req, res) => {
-  const p = await findPaper(req.params.id);
+  const p = await findPaper(req.params.id, req);
   p.expiresAt = new Date(); await p.save(); res.json(paperSummary(p.toObject()));
 }));
 
 r.post('/papers/:id/reopen', asyncHandler(async (req, res) => {
-  const p = await findPaper(req.params.id), ms = Number(req.body?.ms) || DAY;
+  const p = await findPaper(req.params.id, req), ms = Number(req.body?.ms) || DAY;
   if (ms <= 0 || ms > 365 * DAY) throw httpError(400, 'Invalid duration.');
   p.expiresAt = new Date(Date.now() + ms); await p.save(); res.json(paperSummary(p.toObject()));
 }));
@@ -150,7 +217,7 @@ r.post('/papers/:id/reopen', asyncHandler(async (req, res) => {
 // Setting/clearing the scheduled start is blocked once a real (non-preview) attempt exists,
 // so the deadline a student is already relying on can't be moved out from under them.
 r.post('/papers/:id/schedule', asyncHandler(async (req, res) => {
-  const p = await findPaper(req.params.id);
+  const p = await findPaper(req.params.id, req);
   if (await Attempt.exists({ paperCode: p.code, preview: false })) {
     throw httpError(400, 'Students have already started this paper; its start time can no longer be changed.');
   }
@@ -160,7 +227,7 @@ r.post('/papers/:id/schedule', asyncHandler(async (req, res) => {
 }));
 
 r.post('/papers/:id/preview', asyncHandler(async (req, res) => {
-  const p = (await findPaper(req.params.id)).toObject();
+  const p = (await findPaper(req.params.id, req)).toObject();
   const run = buildRun(p.questions, p.shuffle);
   const attempt = await Attempt.create({
     paperCode: p.code, paperTitle: p.title, name: 'Admin', roll: '-', email: req.admin.email, preview: true, run, ...newAttemptFields(p, run)
@@ -169,12 +236,12 @@ r.post('/papers/:id/preview', asyncHandler(async (req, res) => {
 }));
 
 r.delete('/papers/:id/results', asyncHandler(async (req, res) => {
-  const p = await findPaper(req.params.id);
+  const p = await findPaper(req.params.id, req);
   await Result.deleteMany({ paperCode: p.code }); res.json({ ok: true });
 }));
 
 r.delete('/papers/:id', asyncHandler(async (req, res) => {
-  const p = await findPaper(req.params.id);
+  const p = await findPaper(req.params.id, req);
   await Promise.all([Paper.deleteOne({ _id: p._id }), Result.deleteMany({ paperCode: p.code }), Attempt.deleteMany({ paperCode: p.code })]);
   res.json({ ok: true });
 }));

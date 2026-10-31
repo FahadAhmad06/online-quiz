@@ -5,7 +5,7 @@ import save from './save';
 export default function beginTest(p) {
   save('qr_test', {
     attemptId: p.attemptId, run: p.run, preview: !!p.preview, perQ: p.perQ,
-    idx: p.idx, answers: p.answers, qEnd: p.qEnd ? new Date(p.qEnd).getTime() : 0,
+    idx: p.idx, answers: p.answers, subjectiveText: p.subjectiveText || [], qEnd: p.qEnd ? new Date(p.qEnd).getTime() : 0,
     skew: p.serverNow ? p.serverNow - Date.now() : 0
   }, sessionStorage);
 }

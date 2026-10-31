@@ -5,7 +5,10 @@ const schema = new mongoose.Schema({
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
   rollNumber: { type: String, required: true, uppercase: true, trim: true },
   paperCode: { type: String, required: true, uppercase: true, trim: true },
-  grantedBy: String,
+  grantedBy: String, // legacy email string; kept for display
+  // adminId: the Admin._id that granted/owns this retake permission.
+  // Null for legacy grants created before multi-admin support.
+  adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null, index: true },
   used: { type: Boolean, default: false },
   usedAt: { type: Date, default: null },
   cancelled: { type: Boolean, default: false },

@@ -13,6 +13,7 @@ import AdminLogin from './pages/AdminLogin';
 import StudentLogin from './pages/StudentLogin';
 import StudentRegister from './pages/StudentRegister';
 import StudentDashboard from './pages/StudentDashboard';
+import StudentReports from './pages/StudentReports';
 import Join from './pages/Join';
 import Test from './pages/Test';
 import Result from './pages/Result';
@@ -28,14 +29,20 @@ import Students from './pages/admin/Students';
 import Schedule from './pages/admin/Schedule';
 import Retakes from './pages/admin/Retakes';
 import Settings from './pages/admin/Settings';
+import Subjective from './pages/admin/Subjective';
+import SubjectiveReview from './pages/admin/SubjectiveReview';
+import AdminReports from './pages/admin/AdminReports';
+import Teachers from './pages/admin/Teachers';
+import TeacherProfile from './pages/admin/TeacherProfile';
+import StudentProfile from './pages/admin/StudentProfile';
 
 function Shell() {
   const [theme, toggleTheme] = useTheme();
   const { pathname } = useLocation();
   const admin = pathname === '/admin' || pathname.startsWith('/admin/'); // not /admin-login
   const width = admin || pathname === '/' ? 'full'
-    : ['/dashboard', '/result', '/student-login', '/student-register', '/admin-login'].includes(pathname) ? 'wide'
-    : pathname === '/test' ? 'exam' : 'narrow';
+    : ['/dashboard', '/my-reports', '/result', '/student-login', '/student-register', '/admin-login'].includes(pathname) ? 'wide'
+      : pathname === '/test' ? 'exam' : 'narrow';
   return (<>
     {!admin && <Header theme={theme} onToggleTheme={toggleTheme} />}
     <main className={width + (admin ? '' : ' public')}>
@@ -45,6 +52,7 @@ function Shell() {
         <Route path="/student-login" element={<StudentLogin />} />
         <Route path="/student-register" element={<StudentRegister />} />
         <Route path="/dashboard" element={<RequireStudent><StudentDashboard /></RequireStudent>} />
+        <Route path="/my-reports" element={<RequireStudent><StudentReports /></RequireStudent>} />
         <Route path="/join/:code" element={<RequireStudent><Join /></RequireStudent>} />
         <Route path="/test" element={<Test />} />
         <Route path="/result" element={<Result />} />
@@ -57,8 +65,14 @@ function Shell() {
           <Route path="results" element={<Results />} />
           <Route path="rolls" element={<Rolls />} />
           <Route path="students" element={<Students />} />
+          <Route path="students/:roll" element={<StudentProfile />} />
+          <Route path="teachers" element={<RequireAdmin owner><Teachers /></RequireAdmin>} />
+          <Route path="teachers/:id" element={<RequireAdmin owner><TeacherProfile /></RequireAdmin>} />
           <Route path="schedule" element={<Schedule />} />
           <Route path="retakes" element={<Retakes />} />
+          <Route path="subjective" element={<Subjective />} />
+          <Route path="subjective/:attemptId" element={<SubjectiveReview />} />
+          <Route path="reports" element={<AdminReports />} />
           <Route path="settings" element={<Settings />} />
           <Route path="admins" element={<Navigate to="/admin/settings" replace />} />
         </Route>

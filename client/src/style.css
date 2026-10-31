@@ -102,6 +102,14 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 @media (max-width:560px){.pick{grid-template-columns:1fr}}
 
 /* ---- exam / quiz ---- */
+.exam-bar{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:var(--sp-3);margin-bottom:var(--sp-3)}
+.exam-card{padding:var(--sp-5)}
+.exam-actions{justify-content:space-between;margin:var(--sp-4) 0}
+.qcard{margin:var(--sp-3) 0 var(--sp-4)}
+.qlabel{display:block;font-size:13px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.qtext{font-size:20px;line-height:1.4;margin:0 0 var(--sp-4)}
+.kbd-hint{margin-top:var(--sp-3)}
+.kbd-hint kbd{display:inline-block;padding:1px 6px;border:1px solid var(--line);border-radius:4px;background:var(--bg2);font-family:inherit;font-size:12px}
 .exam-head{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-4);flex-wrap:wrap;margin-bottom:var(--sp-3)}
 .opt{display:flex;gap:12px;align-items:center;justify-content:flex-start;width:100%;text-align:left;background:var(--bg);color:var(--ink);border:1.5px solid var(--line);margin-bottom:10px;padding:14px 16px;font-weight:400;border-radius:var(--r-md);box-shadow:none;transition:border-color .12s,box-shadow .12s}
 .opt:hover:not(:disabled){border-color:var(--accent2);box-shadow:none}
@@ -131,7 +139,19 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .qpill.skipped{background:var(--warn);border-color:var(--warn-line);color:var(--warn-line);border-style:dashed}
 .qpill.current{border-color:var(--accent2);box-shadow:0 0 0 3px var(--accent-soft);color:var(--ink);background:var(--card)}
 .qpill.upcoming{opacity:.6}
+.qpill.viewing{border-color:var(--accent2);border-style:dashed;box-shadow:0 0 0 2px var(--accent-soft)}
 .qlegend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin:-6px 0 var(--sp-4)}
+
+.answer-editor{border:1.5px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:var(--bg)}
+.editor-toolbar{display:flex;align-items:center;gap:4px;padding:6px 8px;border-bottom:1px solid var(--line);background:var(--bg2)}
+.editor-toolbar .spacer{flex:1}
+.editor-toolbar button{padding:5px 9px;min-width:30px}
+.answer-textarea{display:block;width:100%;min-height:220px;border:0;border-radius:0;padding:14px 16px;background:transparent;color:var(--ink);font:inherit;line-height:1.6;resize:vertical;margin:0}
+.answer-textarea:focus{outline:none;box-shadow:none}
+.editor-footer{display:flex;justify-content:space-between;padding:6px 14px;border-top:1px solid var(--line);background:var(--bg2)}
+.answer-view{line-height:1.7}
+.answer-view p{margin:0 0 .8em}
+.answer-view ul{margin:0 0 .8em;padding-left:1.3em}
 .qlegend span{display:inline-flex;align-items:center;gap:6px}
 .qlegend i{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--line);display:inline-flex;align-items:center;justify-content:center}
 .qlegend i.answered{background:var(--ok);border-color:var(--ok-line);color:var(--ok-line)}
@@ -322,6 +342,8 @@ tbody tr:hover{background:var(--bg2)}
 @keyframes shimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
 .spinner{width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite;display:inline-block;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
+.fade-up{animation:fadeUp .35s ease both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .loading{display:flex;align-items:center;gap:10px;color:var(--muted);padding:var(--sp-4) 0}
 
 .toast-wrap{position:fixed;bottom:var(--sp-4);right:var(--sp-4);display:flex;flex-direction:column;gap:8px;z-index:70;max-width:360px}
@@ -342,4 +364,38 @@ tbody tr:hover{background:var(--bg2)}
 .pagination .pages{display:flex;gap:6px;align-items:center}
 .pagination button{padding:7px 12px;font-size:14px}
 
+/* ---- student dashboard ---- */
+.welcome{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-4);flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--sp-5);margin-bottom:var(--sp-4);box-shadow:var(--shadow-sm)}
+.welcome-who{display:flex;gap:14px;align-items:center}
+.welcome-who h1{font-size:22px;margin:0 0 4px}
+.avatar.lg{width:52px;height:52px;font-size:20px}
+.welcome-code{min-width:260px}
+.welcome-code .field{margin-top:0}
+.code-box{display:flex;gap:8px}
+.code-box input{margin-bottom:0;flex:1}
+@media (max-width:640px){.welcome{flex-direction:column}.welcome-code{width:100%}}
+
+.history{list-style:none;margin:0;padding:0}
+.history li{display:block}
+.history-row,.history li > :not(a){display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line);color:inherit;text-decoration:none}
+.history li:first-child>*{border-top:0}
+a.history-row:hover{background:var(--bg2);margin:0 -12px;padding-left:12px;padding-right:12px;border-radius:var(--r-sm)}
+.h-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.h-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.h-score{text-align:right;flex:none}
+.h-score b{display:block;font-size:16px}
+.meter{height:4px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:2px}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--blue))}
+.history .ic.soft{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--bg2);color:var(--accent2)}
+
 .countdown{font-size:36px;font-weight:800;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,var(--accent2),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* Live evaluation status (usePoll) */
+.live-status{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.live-status.warn{color:var(--warn-line)}
+.live-status .spinner{width:12px;height:12px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok-line);animation:livePulse 2s ease-in-out infinite}
+@keyframes livePulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.live-dot{animation:none}}
+.eval-progress{margin:var(--sp-3) 0 0;max-width:420px}
+.eval-progress .meter{height:6px;margin-top:6px}

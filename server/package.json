@@ -5,16 +5,30 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node --test --test-concurrency=1 test/evaluation.test.js test/groqEvaluator.test.js test/aiEvaluatorGroq.test.js test/aiEvaluatorInvalidProvider.test.js test/aiFallback.test.js test/aiFallbackDisabled.test.js",
+    "test:ownership": "node --test test/ownership.test.js",
+    "test:rbac": "node --test test/rbac.test.js",
+    "test:pdf": "node --test test/pdfReport.test.js",
+    "test:all": "node --test --test-concurrency=1 test/evaluation.test.js test/groqEvaluator.test.js test/aiEvaluatorGroq.test.js test/aiEvaluatorInvalidProvider.test.js test/aiFallback.test.js test/aiFallbackDisabled.test.js && node --test test/ownership.test.js && node --test test/rbac.test.js && node --test test/pdfReport.test.js",
+    "migrate": "node scripts/migrateOwnership.js",
+    "migrate:dry": "node scripts/migrateOwnership.js --dry-run",
+    "bench": "node test/bench.js",
+    "check:ai": "node scripts/checkAi.js",
+    "check:groq": "node scripts/checkGroq.js",
+    "check:quota": "node scripts/diagnoseQuota.js"
   },
   "dependencies": {
+    "@google/genai": "^2.31.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
+    "groq-sdk": "^1.6.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^7.7.0",
-    "mongoose": "^8.5.0"
+    "mongoose": "^8.5.0",
+    "pdfkit": "^0.20.2"
   }
 }

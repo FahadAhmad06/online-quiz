@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import useFetch from '../hooks/useFetch';
+import usePoll, { POLL_SLOW } from '../hooks/usePoll';
 import load from '../utils/load';
 import Icon from '../components/Icon';
 import StatCard from '../components/StatCard';
@@ -11,7 +11,8 @@ const pctOf = r => r.total ? Math.round(r.correct / r.total * 100) : 0;
 
 export default function StudentDashboard() {
   const s = load('qr_student', null, sessionStorage);
-  const state = useFetch('/me/overview'), d = state.data;
+  // Refreshes by itself while something is awaiting review, so an approval moves it into history.
+  const state = usePoll('/me/overview', o => o.pendingReview.length ? POLL_SLOW : null), d = state.data;
   const [code, setCode] = useState(''), [hint, setHint] = useState(''), [all, setAll] = useState(false), navigate = useNavigate();
   const open = e => {
     e?.preventDefault();
@@ -38,6 +39,9 @@ export default function StudentDashboard() {
         </div>
         {hint && <p className="err small-text" role="alert" style={{ margin: '6px 0 0' }}>{hint}</p>}
       </form>
+      <Link to="/my-reports" id="my-reports-link" className="btn ghost" style={{ whiteSpace: 'nowrap', gap: 6 }}>
+        <Icon name="report" size={16} /> My Reports
+      </Link>
     </section>
 
     {state.error && <ErrorBox message={state.error} onRetry={state.reload} />}
@@ -49,6 +53,18 @@ export default function StudentDashboard() {
           <div className="qrow" key={a.paperCode}>
             <div><b>{a.paperTitle}</b><div className="muted small-text">Code {a.paperCode} · started {new Date(a.startedAt).toLocaleString()}</div></div>
             <Link className="btn" to={'/join/' + a.paperCode}>Continue<Icon name="chevronRight" size={16} /></Link>
+          </div>
+        ))}
+      </div>
+    )}
+
+    {d?.pendingReview.length > 0 && (
+      <div className="card">
+        <div className="card-head"><h2><span className="hicon"><Icon name="file" size={16} /></span>Awaiting review</h2></div>
+        {d.pendingReview.map(a => (
+          <div className="qrow" key={a._id}>
+            <div><b>{a.paperTitle}</b><div className="muted small-text">Code {a.paperCode} · submitted {new Date(a.createdAt).toLocaleString()}</div></div>
+            <Link className="btn ghost" to={'/result?attempt=' + a._id}>Check status</Link>
           </div>
         ))}
       </div>
@@ -70,19 +86,19 @@ export default function StudentDashboard() {
       </div>
       {!d ? [0, 1, 2].map(i => <div key={i} className="skeleton" style={{ height: 52 }} />)
         : !d.results.length ? <EmptyState icon="quiz">No exams completed yet. Enter a paper code above to get started.</EmptyState>
-        : <ul className="history">{results.map(r => {
+          : <ul className="history">{results.map(r => {
             const p = pctOf(r);
-            return (
-              <li key={r._id}>
-                <span className="ic soft"><Icon name="file" size={18} /></span>
-                <div className="h-main">
-                  <b>{r.paperTitle}</b>
-                  <span className="muted small-text">{r.paperCode} · {new Date(r.createdAt).toLocaleString()}</span>
-                  <div className="meter" aria-hidden="true"><i style={{ width: p + '%' }} /></div>
-                </div>
-                <div className="h-score"><b>{r.correct}/{r.total}</b><span className="muted small-text">{p}%</span></div>
-              </li>
-            );
+            const body = (<>
+              <span className="ic soft"><Icon name="file" size={18} /></span>
+              <div className="h-main">
+                <b>{r.paperTitle}</b>
+                <span className="muted small-text">{r.paperCode} · {new Date(r.createdAt).toLocaleString()}</span>
+                <div className="meter" aria-hidden="true"><i style={{ width: p + '%' }} /></div>
+              </div>
+              <div className="h-score"><b>{r.correct}/{r.total}</b><span className="muted small-text">{p}%</span></div>
+            </>);
+            // Older results saved before attempts were linked have no `attempt` ref - show them plainly.
+            return r.attempt ? <li key={r._id}><Link to={'/result?attempt=' + r.attempt} className="history-row">{body}</Link></li> : <li key={r._id}>{body}</li>;
           })}</ul>}
     </div>
   </>);

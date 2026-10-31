@@ -15,6 +15,8 @@ import remaining from '../../utils/remaining';
 import isOpen from '../../utils/isOpen';
 import beginTest from '../../utils/beginTest';
 import downloadCsv from '../../utils/downloadCsv';
+import downloadPdf from '../../utils/downloadPdf';
+import load from '../../utils/load';
 import duration from '../../utils/duration';
 import optionLabel from '../../utils/optionLabel';
 import toLocalInput from '../../utils/toLocalInput';
@@ -26,6 +28,13 @@ export default function PaperDetail() {
   const state = useFetch('/admin/papers/' + id), [busy, setBusy] = useState(false), [showQ, setShowQ] = useState(false);
   const [startsAtInput, setStartsAtInput] = useState(null); // null = not editing
   const retakes = useRetakes();
+  const teacherId = sp.get('teacherId'); // present only when opened from a Teacher Profile (Owner)
+  const isSuper = load('qr_admin', null, sessionStorage)?.isSuper;
+  // Owner can view/export any teacher's quiz (the existing admins-reports route has no ownership
+  // restriction); a regular admin keeps using their own ownership-checked route.
+  const downloadQuizPdf = code => act(() =>
+    downloadPdf((isSuper ? '/admin/admins-reports/quiz/' : '/admin/reports/quiz/') + id, 'Quiz_Report_' + code + '.pdf'),
+    'Report downloaded.', () => {});
   // Runs one admin action: blocks double clicks, toasts the outcome, then refreshes (or runs `after`).
   const act = async (fn, okText, after) => {
     setBusy(true);
@@ -37,10 +46,13 @@ export default function PaperDetail() {
 
   return (
     <Async state={state}>{({ paper: p, results, stats }) => (<>
-      <PageHeader title={p.title} subtitle={<><StatusBadge paper={p} /> <span style={{ marginLeft: 6 }}>{p.questionCount} questions · {p.perQ ? duration(p) + ' total for the test' : 'no time limit'} · {remaining(p)}</span></>}>
-        <Link className="btn ghost" to="/admin/papers"><Icon name="chevronLeft" size={16} />All quizzes</Link>
+      <PageHeader title={p.title} subtitle={<><StatusBadge paper={p} /> <span style={{ marginLeft: 6 }}>{p.questionCount} questions · {p.totalMarks} total marks · {p.perQ ? duration(p) + ' total for the test' : 'no time limit'} · {remaining(p)}{p.createdByName && <> · Created by {p.createdByName}</>}</span></>}>
+        {teacherId
+          ? <Link className="btn ghost" to={'/admin/teachers/' + teacherId}><Icon name="chevronLeft" size={16} />Back to Teacher Profile</Link>
+          : <Link className="btn ghost" to="/admin/papers"><Icon name="chevronLeft" size={16} />All quizzes</Link>}
         {stats.count === 0 && <Link className="btn ghost" to={'/admin/papers/' + id + '/edit'}><Icon name="edit" size={16} />Edit</Link>}
         <button className="outline" disabled={busy} onClick={() => act(async () => { beginTest(await api('/admin/papers/' + id + '/preview', { method: 'POST' })); }, null, () => navigate('/test'))}><Icon name="eye" size={16} />Preview as student</button>
+        <button className="btn" disabled={busy} onClick={() => downloadQuizPdf(p.code)}><Icon name="download" size={14} />PDF</button>
       </PageHeader>
       {sp.get('created') && <div className="notice"><Icon name="checkCircle" /><span><b>Paper created.</b> Share the code or link below with your students.</span></div>}
 
@@ -81,8 +93,16 @@ export default function PaperDetail() {
           <button className="link" onClick={() => setShowQ(v => !v)} aria-expanded={showQ}>{showQ ? 'Hide' : 'Show'}</button>
         </div>
         {showQ && p.questions.map((q, i) => (
-          <div className="qrow" key={i}><div><b>{i + 1}. {q.text}</b>
-            <div className="muted small-text">{q.options.map((o, k) => <span key={k} style={k === q.correct ? { color: 'var(--ok-line)', fontWeight: 600 } : undefined}>{optionLabel(k)}) {o}{k === q.correct ? ' ✓' : ''}{k < q.options.length - 1 ? ' · ' : ''}</span>)}</div>
+          <div className="qrow" key={i}><div style={{ width: '100%' }}>
+            <b>{i + 1}. {q.text}</b> {q.type === 'subjective' && <span className="badge info" style={{ marginLeft: 6 }}>Subjective · {q.maxMarks ?? 0} mark{q.maxMarks === 1 ? '' : 's'}</span>}
+            {q.type === 'subjective' ? (<>
+              {q.instructions && <div className="muted small-text" style={{ marginTop: 4 }}><b>Instructions:</b> {q.instructions}</div>}
+              {q.rubric && <div className="muted small-text" style={{ marginTop: 4 }}><b>Rubric:</b> {q.rubric}</div>}
+              {q.keyConcepts?.length > 0 && <div className="muted small-text" style={{ marginTop: 4 }}><b>Key concepts:</b> {q.keyConcepts.join(', ')}</div>}
+              {q.modelAnswer && <div className="muted small-text" style={{ marginTop: 4 }}><b>Model answer:</b> {q.modelAnswer}</div>}
+            </>) : (
+              <div className="muted small-text">{q.options.map((o, k) => <span key={k} style={k === q.correct ? { color: 'var(--ok-line)', fontWeight: 600 } : undefined}>{optionLabel(k)}) {o}{k === q.correct ? ' ✓' : ''}{k < q.options.length - 1 ? ' · ' : ''}</span>)}</div>
+            )}
           </div></div>
         ))}
       </div>
@@ -98,6 +118,22 @@ export default function PaperDetail() {
           )}
         </div>
         {stats.count > 0 && <p className="muted" style={{ marginTop: -6 }}>Average {stats.average}/{stats.total} ({stats.averagePercent}%) · Highest {stats.highest}/{stats.total}</p>}
+        {results.some(r => r.subjective) && (() => {
+          const evs = results.map(r => r.subjective).filter(Boolean);
+          const approved = evs.reduce((s, e) => s + e.subjectiveApproved, 0);
+          const total = evs.reduce((s, e) => s + e.subjectiveTotal, 0);
+          const needsAttention = evs.reduce((s, e) => s + e.subjectiveManualReview + e.subjectiveFailed, 0);
+          return (
+            <div className="notice" style={{ marginBottom: 12 }}>
+              <Icon name="edit" />
+              <span>
+                <b>Subjective grading:</b> {approved}/{total} answers approved
+                {needsAttention > 0 && <> · <span style={{ color: 'var(--bad, #c62828)' }}>{needsAttention} need attention</span></>}
+                {' '}· <Link className="link" to={'/admin/subjective?paper=' + p.code}>Open Subjective Checking</Link>
+              </span>
+            </div>
+          );
+        })()}
         <ResultsTable rows={results}
           onDelete={async r => (await confirm({ title: 'Delete this result?', message: 'Delete the result of ' + r.name + ' (' + r.roll + ')?', confirmText: 'Delete', danger: true })) && act(() => api('/admin/results/' + r._id, { method: 'DELETE' }), 'Result deleted.')}
           {...retakes.tableProps} />

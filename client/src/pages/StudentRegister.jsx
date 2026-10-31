@@ -38,7 +38,7 @@ export default function StudentRegister() {
         <div className="grid cols-2 tight">
           <div>
             <label className="field" htmlFor="sr-roll">Roll number</label>
-            <input id="sr-roll" type="text" placeholder="e.g. 23CS001" value={f.rollNumber} onChange={set('rollNumber')} autoComplete="username" autoCapitalize="characters" />
+            <input id="sr-roll" type="text" placeholder="e.g. 2024-CSE-001" value={f.rollNumber} onChange={set('rollNumber')} autoComplete="username" autoCapitalize="characters" />
           </div>
           <div>
             <label className="field" htmlFor="sr-pin">Registration PIN</label>

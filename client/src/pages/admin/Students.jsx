@@ -66,6 +66,7 @@ export default function Students() {
                 <td>{x.avg === null ? <span className="muted">—</span> : x.avg + '%'}</td>
                 <td className="muted small-text">{x.last ? new Date(x.last).toLocaleString() : '—'}</td>
                 <td><div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}>
+                  <Link className="btn outline small" to={'/admin/students/' + x.roll}>View profile</Link>
                   <button className="outline small" onClick={() => toggle(x.roll)} aria-expanded={open === x.roll}>{open === x.roll ? 'Hide history' : 'View history'}</button>
                   <button className="danger" disabled={busy} onClick={() => remove(x)}>Delete</button>
                 </div></td>

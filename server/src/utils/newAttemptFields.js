@@ -8,7 +8,7 @@ export default function newAttemptFields(paper, run, { fromSchedule = false } = 
   const now = Date.now(), scheduled = paper.startsAt ? new Date(paper.startsAt).getTime() : null;
   const base = fromSchedule && scheduled && scheduled <= now ? scheduled : now;
   return {
-    perQ: paper.perQ, idx: 0, answers: run.map(() => -1),
+    perQ: paper.perQ, idx: 0, answers: run.map(() => -1), subjectiveText: run.map(() => ''),
     qEnd: paper.perQ ? new Date(base + paper.perQ * run.length * 1000) : null,
     startedAt: new Date(now)
   };

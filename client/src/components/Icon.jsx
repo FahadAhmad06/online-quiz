@@ -36,7 +36,9 @@ const P = {
   bolt: <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />,
   shield: <><path d="M12 3 4 6v6c0 4.4 3.4 7.6 8 9 4.6-1.4 8-4.6 8-9V6l-8-3Z" /><path d="m9 12 2 2 4-4" /></>,
   cap: <><path d="M2 9 12 4l10 5-10 5L2 9Z" /><path d="M6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5M22 9v6" /></>,
-  activity: <path d="M3 12h4l3-8 4 16 3-8h4" />
+  activity: <path d="M3 12h4l3-8 4 16 3-8h4" />,
+  filter: <><path d="M4 6h16M7 12h10M10 18h4" /></>,
+  report: <><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v5h5M9 11h6M9 15h4" /></>
 };
 
 export default function Icon({ name, size = 18, label, strokeWidth = 2, ...rest }) {

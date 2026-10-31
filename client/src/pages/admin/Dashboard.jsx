@@ -9,6 +9,7 @@ import StatCard from '../../components/StatCard';
 import StatusBadge from '../../components/StatusBadge';
 import ErrorBox from '../../components/ErrorBox';
 import EmptyState from '../../components/EmptyState';
+import Loading from '../../components/Loading';
 import { AreaChart, BarChart } from '../../components/Charts';
 
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -21,22 +22,142 @@ const quick = [
   { to: '/admin/schedule', icon: 'calendar', title: 'Schedule Paper', sub: 'Set start date & time' },
   { to: '/admin/retakes', icon: 'retake', title: 'Retake Requests', sub: 'Allow or cancel' }
 ];
+const ownerQuick = [
+  { to: '/admin/teachers', icon: 'shield', title: 'Manage Teachers', sub: 'View roster & profiles' },
+  { to: '/admin/settings', icon: 'plus', title: 'Add a Teacher', sub: 'Create an account' },
+  { to: '/admin/reports', icon: 'report', title: 'Platform Reports', sub: 'PDF / CSV exports' },
+  { to: '/admin/students', icon: 'students', title: 'All Students', sub: 'Platform-wide roster' }
+];
 const recent = n => n ? <><Icon name="arrowUp" size={13} /><b>{n}</b>&nbsp;in the last 30 days</> : 'None in the last 30 days';
 
 function Skeleton({ h = 120 }) { return <div className="skeleton" style={{ height: h, borderRadius: 16 }} />; }
 
-export default function Dashboard() {
-  const s = load('qr_admin', null, sessionStorage);
-  const state = useFetch('/admin/stats?tz=' + encodeURIComponent(tz)), d = state.data;
+/* ---------- Owner: teachers / platform section (shown BELOW the owner's own dashboard) ---------- */
+function OwnerSection() {
+  const state = useFetch('/admin/admins');
+  const admins = state.data?.admins || [];
+  const totals = admins.reduce((t, a) => ({
+    students: t.students + a.assignedStudents, quizzes: t.quizzes + a.createdQuizzes, attempts: t.attempts + a.quizAttempts,
+    scoreSum: t.scoreSum + (a.averageScore != null ? a.averageScore * a.quizAttempts : 0),
+    recent: t.recent + (new Date(a.createdAt) >= new Date(Date.now() - 30 * 86400000) ? 1 : 0)
+  }), { students: 0, quizzes: 0, attempts: 0, scoreSum: 0, recent: 0 });
+  const platformAvg = totals.attempts ? Math.round(totals.scoreSum / totals.attempts) : null;
+  const active = admins.filter(a => a.isEnabled).length;
+  const topTeachers = [...admins].sort((a, b) => b.quizAttempts - a.quizAttempts).slice(0, 6);
+
+  // Chart data (top 8 teachers)
+  const chartTeachers = [...admins].sort((a, b) => b.quizAttempts - a.quizAttempts).slice(0, 8);
+  const attemptsData = chartTeachers.map(a => ({
+    label: a.displayName,
+    value: a.quizAttempts,
+    tip: a.displayName + ' · ' + a.quizAttempts + ' attempts, ' + a.createdQuizzes + ' quizzes'
+  }));
+  const scoreData = chartTeachers
+    .filter(a => a.averageScore != null)
+    .map(a => ({
+      label: a.displayName,
+      value: Math.round(a.averageScore),
+      tip: a.displayName + ' · avg score ' + Math.round(a.averageScore) + '%'
+    }));
+
+  return (<>
+    <div className="page-head" style={{ marginTop: 40 }}>
+      <div>
+        <h1>Teachers & Platform</h1>
+        <p className="muted">Platform-wide overview. Open a teacher's profile for their individual data.</p>
+      </div>
+    </div>
+
+    {state.error && <ErrorBox message={state.error} onRetry={state.reload} />}
+
+    <div className="grid cols-4">
+      {!state.data ? [0, 1, 2, 3].map(i => <Skeleton key={i} />) : (<>
+        <StatCard icon="shield" tone="purple" title="Total Teachers" value={admins.length} delta={recent(totals.recent)} to="/admin/teachers" />
+        <StatCard icon="students" tone="blue" title="Assigned Students" value={totals.students} to="/admin/students" />
+        <StatCard icon="quiz" tone="green" title="Quizzes Created" value={totals.quizzes} to="/admin/teachers" />
+        <StatCard icon="checkCircle" tone="amber" title="Quiz Attempts" value={totals.attempts} delta={platformAvg != null ? 'Platform average ' + platformAvg + '%' : null} to="/admin/teachers" />
+      </>)}
+    </div>
+
+    <div className="dash-grid">
+      <div className="card">
+        <div className="card-head">
+          <h2><span className="hicon"><Icon name="chart" size={16} /></span>Attempts per teacher</h2>
+          <Link className="link" to="/admin/teachers">View all</Link>
+        </div>
+        {!state.data ? <Skeleton h={220} /> : totals.attempts === 0
+          ? <EmptyState icon="chart">No attempts yet. Data appears here once students complete teachers' quizzes.</EmptyState>
+          : <BarChart caption="Quiz attempts per teacher" valueName="Attempts" data={attemptsData} />}
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <h2><span className="hicon"><Icon name="checkCircle" size={16} /></span>Average score per teacher</h2>
+        </div>
+        {!state.data ? <Skeleton h={220} /> : !scoreData.length
+          ? <EmptyState icon="chart">No scores yet.</EmptyState>
+          : <BarChart caption="Average score (%) per teacher" valueName="Avg score %" data={scoreData} />}
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <h2><span className="hicon"><Icon name="shield" size={16} /></span>Teachers overview</h2>
+          <Link className="link" to="/admin/teachers">View all</Link>
+        </div>
+        {!state.data ? <Loading /> : !admins.length
+          ? <EmptyState icon="shield">No teacher accounts yet. <Link className="link" to="/admin/settings">Add one</Link>.</EmptyState>
+          : (<div className="wrapx"><table>
+              <thead><tr><th>Teacher</th><th>Students</th><th>Quizzes</th><th>Attempts</th><th>Status</th></tr></thead>
+              <tbody>{topTeachers.map(a => (
+                <tr key={a._id}>
+                  <td><Link className="link" to={'/admin/teachers/' + a._id}><b>{a.displayName}</b></Link></td>
+                  <td>{a.assignedStudents}</td>
+                  <td>{a.createdQuizzes}</td>
+                  <td>{a.quizAttempts}</td>
+                  <td>{a.isEnabled ? <span className="badge ok"><Icon name="checkCircle" />Active</span> : <span className="badge bad"><Icon name="lock" />Disabled</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>)}
+      </div>
+
+      <div className="card">
+        <div className="card-head"><h2><span className="hicon"><Icon name="bolt" size={16} /></span>Owner actions</h2></div>
+        <div className="qa-grid">
+          {ownerQuick.map(q => (
+            <Link key={q.to} to={q.to} className="qa"><span className="ic"><Icon name={q.icon} size={20} /></span><b>{q.title}</b><span>{q.sub}</span></Link>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><h2><span className="hicon"><Icon name="checkCircle" size={16} /></span>Platform summary</h2></div>
+        {!state.data ? <Skeleton h={120} /> : (
+          <dl className="kv">
+            <dt>Active teacher accounts</dt><dd>{active} of {admins.length}</dd>
+            <dt>Platform average score</dt><dd>{platformAvg != null ? platformAvg + '%' : '—'}</dd>
+            <dt>Total assigned students</dt><dd>{totals.students}</dd>
+          </dl>
+        )}
+      </div>
+    </div>
+  </>);
+}
+
+/* ---------- Teacher dashboard (also shown at the TOP for the owner) ---------- */
+function TeacherDashboard({ name, owner = false }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(i); }, []);
-  const name = (s?.email || 'Admin').split('@')[0];
+  const state = useFetch('/admin/stats?tz=' + encodeURIComponent(tz)), d = state.data;
 
   return (<>
     <div className="page-head">
       <div>
         <h1>Welcome back, {name} 👋</h1>
-        <p className="muted">Here's what's happening with your quiz platform today.</p>
+        <p className="muted">
+          {owner
+            ? 'Your own students, quizzes and results. Scroll down for all teachers.'
+            : "Here's what's happening with your quiz platform today."}
+        </p>
       </div>
       <div className="datechip">
         <Icon name="calendar" size={20} />
@@ -142,4 +263,20 @@ export default function Dashboard() {
       </div>
     </div>
   </>);
+}
+
+export default function Dashboard() {
+  const s = load('qr_admin', null, sessionStorage);
+  const name = s?.name || (s?.email || 'Admin').split('@')[0];
+
+  // Owner: own students/quiz dashboard first, then scroll down for teachers & platform section.
+  // Teacher: only their own dashboard.
+  // Each component calls its own hooks unconditionally, so hook order is always safe.
+  if (s?.isSuper) {
+    return (<>
+      <TeacherDashboard name={name} owner />
+      <OwnerSection />
+    </>);
+  }
+  return <TeacherDashboard name={name} />;
 }

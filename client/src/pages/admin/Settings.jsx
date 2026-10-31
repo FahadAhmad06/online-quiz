@@ -14,6 +14,7 @@ export default function Settings() {
       <div className="card" style={{ margin: 0 }}>
         <div className="card-head"><h2><span className="hicon"><Icon name="user" size={16} /></span>Account</h2></div>
         <dl className="kv">
+          {s?.name && <><dt>Name</dt><dd>{s.name}</dd></>}
           <dt>Email</dt><dd>{s?.email}</dd>
           <dt>Role</dt><dd>{s?.isSuper ? 'Owner' : 'Administrator'}</dd>
           <dt>Session</dt><dd>Ends when you log out or close this tab</dd>

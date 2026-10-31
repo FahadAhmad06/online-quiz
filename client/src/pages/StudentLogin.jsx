@@ -36,7 +36,7 @@ export default function StudentLogin() {
       <form onSubmit={login} noValidate>
         <Alert kind={msg?.kind}>{msg?.text}</Alert>
         <label className="field" htmlFor="sl-roll">Roll number</label>
-        <input id="sl-roll" type="text" placeholder="e.g. 23CS001" value={rollNumber} onChange={e => setRollNumber(e.target.value)} autoComplete="username" autoCapitalize="characters" />
+        <input id="sl-roll" type="text" placeholder="e.g. 2024-CSE-001" value={rollNumber} onChange={e => setRollNumber(e.target.value)} autoComplete="username" autoCapitalize="characters" />
         <label className="field" htmlFor="sl-pass">Password</label>
         <PasswordField id="sl-pass" placeholder="Your password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
         <button type="submit" className="block" disabled={busy}>{busy ? <><span className="spinner" />Logging in…</> : <>Log in<Icon name="chevronRight" size={16} /></>}</button>

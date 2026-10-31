@@ -1,7 +1,8 @@
 import load from './load';
 import save from './save';
 // Calls the server. Adds the admin or student token if logged in; throws Error(message) on failure.
-export default async function api(path, { method = 'GET', body } = {}) {
+// `signal` aborts the request (polling cleanup); `cache` is passed to fetch ('no-store' for polls).
+export default async function api(path, { method = 'GET', body, signal, cache } = {}) {
   const key = path.startsWith('/admin') ? 'qr_admin' : 'qr_student'; // papers/attempts routes also carry the student token
   const s = load(key, null, sessionStorage);
   let res;
@@ -9,9 +10,10 @@ export default async function api(path, { method = 'GET', body } = {}) {
     res = await fetch((import.meta.env.VITE_API_URL || '') + '/api' + path, {
       method,
       headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(s?.token ? { Authorization: 'Bearer ' + s.token } : {}) },
-      body: body ? JSON.stringify(body) : undefined
+      body: body ? JSON.stringify(body) : undefined, signal, cache
     });
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err;
     const e = new Error('Network error. Check your connection and try again.'); e.status = 0; throw e;
   }
   const data = await res.json().catch(() => ({}));

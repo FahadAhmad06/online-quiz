@@ -5,7 +5,7 @@ export default async function requireAdmin(req, res, next) {
   try {
     const h = req.headers.authorization || '';
     const payload = jwt.verify(h.startsWith('Bearer ') ? h.slice(7) : '', config.jwtSecret);
-    if (!payload.isSuper && !(await Admin.exists({ email: payload.email }))) throw new Error('admin removed');
+    if (!payload.isSuper && !(await Admin.exists({ email: payload.email, isEnabled: true }))) throw new Error('admin removed or disabled');
     req.admin = payload; next();
   } catch { res.status(401).json({ error: 'Please log in again.' }); }
 }

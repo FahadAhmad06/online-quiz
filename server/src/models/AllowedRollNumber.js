@@ -9,6 +9,9 @@ const schema = new mongoose.Schema({
   registeredStudent: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null },
   pinFailCount: { type: Number, default: 0 },
   pinLockedUntil: { type: Date, default: null },
-  createdBy: String
+  createdBy: String, // legacy email string; kept for display
+  // adminId: the Admin._id that created this allowlist entry.
+  // Null for legacy entries created before multi-admin support.
+  adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null, index: true }
 }, { timestamps: true });
 export default mongoose.model('AllowedRollNumber', schema);

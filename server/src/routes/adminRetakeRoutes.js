@@ -6,14 +6,28 @@ import RetakeGrant from '../models/RetakeGrant.js';
 import normalizeRoll from '../utils/normalizeRoll.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import httpError from '../utils/httpError.js';
+import { ownerFilter, adminObjectId } from '../utils/adminFilter.js';
 
 const r = Router(); // mounted behind requireAdmin
 
+// Helper: get the set of paper codes this admin owns. Super-admin: null (no restriction).
+async function adminPaperCodes(req) {
+  if (req.admin.isSuper) return null;
+  const papers = await Paper.find(ownerFilter(req)).select('code').lean();
+  return papers.map(p => p.code);
+}
+
 // One row per student+paper that has at least one submitted result, with current retake status.
 r.get('/retakes', asyncHandler(async (req, res) => {
+  const codes = await adminPaperCodes(req);
   const match = {};
+  if (codes !== null) match.paperCode = { $in: codes };
   if (req.query.roll) match.roll = normalizeRoll(req.query.roll);
-  if (req.query.code) match.paperCode = String(req.query.code).trim().toUpperCase();
+  if (req.query.code) {
+    const code = String(req.query.code).trim().toUpperCase();
+    if (codes !== null && !codes.includes(code)) throw httpError(403, 'You do not have permission to view retakes for this paper.');
+    match.paperCode = code;
+  }
 
   const groups = await Result.aggregate([
     { $match: match },
@@ -27,7 +41,8 @@ r.get('/retakes', asyncHandler(async (req, res) => {
     { $sort: { lastAt: -1 } }
   ]);
 
-  const grants = await RetakeGrant.find({ used: false }).select('rollNumber paperCode cancelled').lean();
+  const grantFilter = codes !== null ? { paperCode: { $in: codes }, used: false } : { used: false };
+  const grants = await RetakeGrant.find(grantFilter).select('rollNumber paperCode cancelled').lean();
   const allowed = new Set(grants.filter(g => !g.cancelled).map(g => g.rollNumber + '|' + g.paperCode));
   const cancelled = new Set(grants.filter(g => g.cancelled).map(g => g.rollNumber + '|' + g.paperCode));
 
@@ -47,11 +62,19 @@ r.post('/retakes', asyncHandler(async (req, res) => {
 
   const student = await Student.findOne({ rollNumber });
   if (!student) throw httpError(404, 'No student account with that roll number.');
-  if (!(await Paper.exists({ code: paperCode }))) throw httpError(404, 'No paper with that code.');
+
+  // Verify this admin owns the paper they are granting a retake for.
+  const paper = await Paper.findOne({ code: paperCode });
+  if (!paper) throw httpError(404, 'No paper with that code.');
+  const codes = await adminPaperCodes(req);
+  if (codes !== null && !codes.includes(paperCode)) {
+    throw httpError(403, 'You do not have permission to grant retakes for this paper.');
+  }
 
   const grant = await RetakeGrant.findOneAndUpdate(
     { student: student._id, paperCode, used: false },
-    { student: student._id, rollNumber, paperCode, grantedBy: req.admin.email, used: false, cancelled: false, cancelledAt: null },
+    { student: student._id, rollNumber, paperCode, grantedBy: req.admin.email,
+      adminId: adminObjectId(req), used: false, cancelled: false, cancelledAt: null },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
   res.status(201).json({ ok: true, rollNumber, paperCode, grantedAt: grant.createdAt });
@@ -65,6 +88,12 @@ r.post('/retakes/cancel', asyncHandler(async (req, res) => {
 
   const student = await Student.findOne({ rollNumber });
   if (!student) throw httpError(404, 'No student account with that roll number.');
+
+  // Verify this admin owns the paper.
+  const codes = await adminPaperCodes(req);
+  if (codes !== null && !codes.includes(paperCode)) {
+    throw httpError(403, 'You do not have permission to cancel retakes for this paper.');
+  }
 
   const grant = await RetakeGrant.findOneAndUpdate(
     { student: student._id, paperCode, used: false, cancelled: false },

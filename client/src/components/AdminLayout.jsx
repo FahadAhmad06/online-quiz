@@ -8,13 +8,18 @@ import useOutside from '../hooks/useOutside';
 // Every link points at a working page; Settings shows admin management only to the owner.
 const nav = [
   { to: '/admin', end: true, label: 'Dashboard', icon: 'home' },
-  { label: 'Manage Quizzes', icon: 'quiz', base: '/admin/papers', children: [
-    { to: '/admin/papers', end: true, label: 'All quizzes' },
-    { to: '/admin/papers/new', label: 'Create quiz' }
-  ] },
+  {
+    label: 'Manage Quizzes', icon: 'quiz', base: '/admin/papers', children: [
+      { to: '/admin/papers', end: true, label: 'All quizzes' },
+      { to: '/admin/papers/new', label: 'Create quiz' }
+    ]
+  },
   { to: '/admin/students', label: 'Students', icon: 'students' },
+  { to: '/admin/teachers', label: 'Teachers', icon: 'shield', owner: true },
   { to: '/admin/rolls', label: 'Roll & PIN Management', icon: 'key' },
   { to: '/admin/results', label: 'Reports', icon: 'chart' },
+  { to: '/admin/subjective', label: 'Subjective Checking', icon: 'edit' },
+  { to: '/admin/reports', label: 'PDF Reports', icon: 'report' },
   { to: '/admin/schedule', label: 'Paper Schedule', icon: 'calendar' },
   { to: '/admin/retakes', label: 'Retake Requests', icon: 'retake' },
   { to: '/admin/settings', label: 'Settings', icon: 'settings' }
@@ -40,7 +45,9 @@ export default function AdminLayout({ theme, onToggleTheme }) {
   useOutside(prof, () => setMenu(false), menu);
   useEffect(() => { setOpen(false); setMenu(false); }, [pathname]);
   const logout = () => { sessionStorage.removeItem('qr_admin'); navigate('/'); };
-  const name = (s?.email || 'admin').split('@')[0];
+  // s.name comes from login (teachers only; the Owner has no name concept). Falls back to the
+  // email's local part for the Owner or for a teacher account created before names existed.
+  const name = s?.name || (s?.email || 'admin').split('@')[0];
 
   return (
     <div className="admin">
@@ -51,7 +58,7 @@ export default function AdminLayout({ theme, onToggleTheme }) {
           <span><b>QuizRoom</b><small>Learn • Test • Grow</small></span>
         </Link>
         <nav className="navlist">
-          {nav.map(item => item.children
+          {nav.filter(item => !item.owner || s?.isSuper).map(item => item.children
             ? <NavGroup key={item.label} item={item} pathname={pathname} />
             : <NavLink key={item.to} to={item.to} end={item.end} className="navitem"><span className="icon"><Icon name={item.icon} size={20} /></span>{item.label}</NavLink>)}
           <div className="navsep" />

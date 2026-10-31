@@ -5,11 +5,18 @@ function paperStatus(p) {
   if (!isOpen(p)) return 'expired';
   return 'active';
 }
+// MCQ questions are worth 1 mark each (never stored on the question itself - matches how
+// publicRoutes.js scores an attempt: mcqTotal is just a count); subjective questions carry their
+// own maxMarks. Kept here, not recomputed per caller, so every paper listing agrees on the total.
+function totalMarks(questions) {
+  return questions.reduce((s, q) => s + (q.type === 'subjective' ? (q.maxMarks || 0) : 1), 0);
+}
+
 export default function paperSummary(p, submissions = 0) {
   return {
     _id: p._id, code: p.code, title: p.title, perQ: p.perQ, shuffle: p.shuffle,
     startsAt: p.startsAt, expiresAt: p.expiresAt,
-    createdAt: p.createdAt, questionCount: p.questions.length, submissions,
+    createdAt: p.createdAt, questionCount: p.questions.length, totalMarks: totalMarks(p.questions), submissions,
     open: isOpen(p), status: paperStatus(p)
   };
 }
