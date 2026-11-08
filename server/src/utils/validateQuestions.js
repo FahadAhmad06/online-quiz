@@ -12,6 +12,13 @@ export default function validateQuestions(qs) {
       if (q.keyConcepts && (!Array.isArray(q.keyConcepts) || q.keyConcepts.length > 30 || q.keyConcepts.some(k => typeof k !== 'string' || k.length > 200))) return 'Key concepts must be a short list of plain text items.';
       continue;
     }
+    if (q.type === 'truefalse') {
+      const opts = q.options && Array.isArray(q.options) && q.options.length === 2 ? q.options : ['True', 'False'];
+      if (!Array.isArray(q.options) || q.options.length !== 2) return 'True/False questions must have exactly two options: True and False.';
+      if (q.options.some(o => typeof o !== 'string' || !o.trim())) return 'True/False questions require exactly two non-empty options.';
+      if (!Number.isInteger(q.correct) || q.correct < 0 || q.correct >= opts.length) return 'Pick the correct answer for every True/False question.';
+      continue;
+    }
     if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 4) return 'Every question needs 2 to 4 options.';
     if (q.options.some(o => typeof o !== 'string' || !o.trim())) return 'Fill in every option.';
     if (!Number.isInteger(q.correct) || q.correct < 0 || q.correct >= q.options.length) return 'Pick the correct option for every question.';

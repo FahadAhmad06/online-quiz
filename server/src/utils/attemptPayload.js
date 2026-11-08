@@ -4,10 +4,12 @@
 export default function attemptPayload(attempt, paper) {
   const a = attempt.toObject ? attempt.toObject() : attempt;
   return {
-    attemptId: a._id, perQ: paper.perQ, preview: a.preview,
-    idx: a.idx, answers: a.answers, subjectiveText: a.subjectiveText || [], qEnd: a.qEnd, serverNow: Date.now(),
+    attemptId: a._id, perQ: paper.perQ ?? a.perQ ?? 0, timingMode: a.timingMode || paper.timingMode || 'perQuestion',
+    customDuration: a.customDuration ?? paper.customDuration ?? 0, preview: a.preview,
+    idx: a.idx, answers: a.answers, subjectiveText: a.subjectiveText || [], qEnd: a.qEnd, startedAt: a.startedAt,
+    serverNow: Date.now(),
     run: a.run.map(q => q.type === 'subjective'
       ? { type: 'subjective', text: q.text, maxMarks: q.maxMarks, instructions: q.instructions }
-      : { type: 'mcq', text: q.text, options: q.options })
+      : { type: q.type || 'mcq', text: q.text, options: q.options })
   };
 }

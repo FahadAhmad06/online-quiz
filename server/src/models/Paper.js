@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 // type 'mcq' uses options/correct; type 'subjective' uses the rest. rubric/keyConcepts/modelAnswer
 // are grading-only and must never reach a student-facing payload (see attemptPayload.js).
 const question = new mongoose.Schema({
-  type: { type: String, enum: ['mcq', 'subjective'], default: 'mcq' },
+  type: { type: String, enum: ['mcq', 'truefalse', 'subjective'], default: 'mcq' },
   text: String, options: [String], correct: Number,
   maxMarks: Number, instructions: String, rubric: String, keyConcepts: [String], modelAnswer: String
 }, { _id: false });
@@ -10,6 +10,8 @@ const schema = new mongoose.Schema({
   code: { type: String, required: true, unique: true, uppercase: true },
   title: { type: String, required: true },
   perQ: { type: Number, default: 0 },          // seconds per question, 0 = no limit
+  timingMode: { type: String, enum: ['perQuestion', 'customTotal'], default: 'perQuestion' },
+  customDuration: { type: Number, default: 0 }, // seconds for custom total exam length; 0 = not used
   shuffle: { type: Boolean, default: true },
   questions: [question],
   startsAt: { type: Date, default: null },      // null = available immediately

@@ -24,7 +24,9 @@ const r = Router(), DAY = 86400000;
 const cleanQuestion = q => q.type === 'subjective'
   ? { type: 'subjective', text: q.text.trim(), maxMarks: q.maxMarks, instructions: (q.instructions || '').trim(),
       rubric: (q.rubric || '').trim(), keyConcepts: (q.keyConcepts || []).map(k => k.trim()).filter(Boolean), modelAnswer: (q.modelAnswer || '').trim() }
-  : { type: 'mcq', text: q.text.trim(), options: q.options.map(o => o.trim()), correct: q.correct };
+  : q.type === 'truefalse'
+    ? { type: 'truefalse', text: q.text.trim(), options: ['True', 'False'], correct: Number.isInteger(q.correct) && q.correct >= 0 && q.correct < 2 ? q.correct : 0 }
+    : { type: 'mcq', text: q.text.trim(), options: q.options.map(o => o.trim()), correct: q.correct };
 const validTz = tz => { try { return new Intl.DateTimeFormat('en', { timeZone: String(tz || 'UTC') }).resolvedOptions().timeZone; } catch { return 'UTC'; } };
 
 // Find a paper by ID, then verify the requesting admin owns it (or is super).
@@ -120,12 +122,14 @@ r.patch('/papers/:id', asyncHandler(async (req, res) => {
   if (await Attempt.exists({ paperCode: p.code, preview: false }) || await Result.exists({ paperCode: p.code })) {
     throw httpError(400, 'Students have already taken this paper; its questions and timing can no longer be edited.');
   }
-  const title = String(b.title || '').trim(), perQ = Number(b.perQ);
+  const title = String(b.title || '').trim(), perQ = Number(b.perQ), timingMode = b.timingMode === 'customTotal' ? 'customTotal' : 'perQuestion';
+  const customDuration = timingMode === 'customTotal' ? Number(b.customDuration) : 0;
   if (!title || title.length > 120) throw httpError(400, 'Give the paper a title (up to 120 characters).');
   if (!Number.isFinite(perQ) || perQ < 0 || perQ > 3600) throw httpError(400, 'Time per question must be from 0 to 60 minutes.');
+  if (timingMode === 'customTotal' && (!Number.isFinite(customDuration) || customDuration <= 0 || customDuration > 86400 * 365)) throw httpError(400, 'Custom duration must be a positive value up to one year.');
   const qErr = validateQuestions(b.questions);
   if (qErr) throw httpError(400, qErr);
-  p.title = title; p.perQ = Math.round(perQ); p.shuffle = b.shuffle !== false;
+  p.title = title; p.perQ = Math.round(perQ); p.timingMode = timingMode; p.customDuration = timingMode === 'customTotal' ? Math.round(customDuration) : 0; p.shuffle = b.shuffle !== false;
   p.questions = b.questions.map(cleanQuestion);
   await p.save();
   res.json(paperSummary(p.toObject()));
@@ -149,16 +153,18 @@ r.get('/papers', asyncHandler(async (req, res) => {
 
 r.post('/papers', asyncHandler(async (req, res) => {
   const b = req.body || {}, title = String(b.title || '').trim();
-  const perQ = Number(b.perQ), dur = b.durationMs == null ? null : Number(b.durationMs);
+  const perQ = Number(b.perQ), dur = b.durationMs == null ? null : Number(b.durationMs), timingMode = b.timingMode === 'customTotal' ? 'customTotal' : 'perQuestion';
+  const customDuration = timingMode === 'customTotal' ? Number(b.customDuration) : 0;
   if (!title || title.length > 120) throw httpError(400, 'Give the paper a title (up to 120 characters).');
   if (!Number.isFinite(perQ) || perQ < 0 || perQ > 3600) throw httpError(400, 'Time per question must be from 0 to 60 minutes.');
+  if (timingMode === 'customTotal' && (!Number.isFinite(customDuration) || customDuration <= 0 || customDuration > 86400 * 365)) throw httpError(400, 'Custom duration must be a positive value up to one year.');
   if (dur !== null && (!Number.isFinite(dur) || dur <= 0)) throw httpError(400, 'Enter how long the link stays active.');
   let startsAt = null;
   if (b.startsAt) { startsAt = new Date(b.startsAt); if (isNaN(startsAt)) throw httpError(400, 'Invalid start time.'); }
   const qErr = validateQuestions(b.questions);
   if (qErr) throw httpError(400, qErr);
   const paper = await Paper.create({
-    code: await generateCode(), title, perQ: Math.round(perQ), shuffle: b.shuffle !== false,
+    code: await generateCode(), title, perQ: Math.round(perQ), timingMode, customDuration: timingMode === 'customTotal' ? Math.round(customDuration) : 0, shuffle: b.shuffle !== false,
     startsAt, expiresAt: dur === null ? null : new Date(Date.now() + dur), createdBy: req.admin.email,
     adminId: adminObjectId(req), // always set from the verified JWT, never from the request body
     questions: b.questions.map(cleanQuestion)

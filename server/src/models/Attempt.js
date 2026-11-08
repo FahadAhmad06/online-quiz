@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 // One started test. Holds the correct answers (and subjective rubric/model answer) on the server only.
 const q = new mongoose.Schema({
-  type: { type: String, enum: ['mcq', 'subjective'], default: 'mcq' },
+  type: { type: String, enum: ['mcq', 'truefalse', 'subjective'], default: 'mcq' },
   text: String, options: [String], correct: Number,
   maxMarks: Number, instructions: String, rubric: String, keyConcepts: [String], modelAnswer: String
 }, { _id: false });
@@ -52,14 +52,30 @@ const schema = new mongoose.Schema({
   submitted: { type: Boolean, default: false },
   run: [q],
   perQ: { type: Number, default: 0 },      // copied from Paper.perQ at creation; a deadline already in progress can't change
+  timingMode: { type: String, enum: ['perQuestion', 'customTotal'], default: 'perQuestion' },
+  customDuration: { type: Number, default: 0 },
   idx: { type: Number, default: 0 },
-  answers: { type: [Number], default: [] },      // mcq questions only; -1 = unanswered
+  answers: { type: [Number], default: [] },      // objective questions only; -1 = unanswered
   subjectiveText: { type: [String], default: [] }, // subjective questions only, same index as `run`
   evaluations: { type: [evaluation], default: [] }, // one entry per subjective question, added at submit time
   qEnd: { type: Date, default: null },
   startedAt: { type: Date, default: Date.now },
   attemptNumber: { type: Number, default: 1 }, // 2+ only after an admin-granted retake
-  needsGrading: { type: Boolean, default: false } // true from submit until every subjective question is approved
+  needsGrading: { type: Boolean, default: false }, // true from submit until every subjective question is approved
+  // Tab-switch tracking and suspension control. The server keeps the authoritative count; refreshes
+  // and duplicate events from the same browser action must never move the count forward on their own.
+  tabSwitchCount: { type: Number, default: 0 },
+  examStatus: { type: String, enum: ['in_progress', 'suspended'], default: 'in_progress' },
+  suspendedAt: { type: Date, default: null },
+  suspensionReason: { type: String, default: null },
+  resumedAt: { type: Date, default: null },
+  resumedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null },
+  violationHistory: [{
+    at: { type: Date, default: Date.now },
+    count: { type: Number, default: 0 },
+    reason: { type: String, default: '' },
+    source: { type: String, default: 'visibility' }
+  }]
 }, { timestamps: true });
 // Auto-clean old attempts after 3 days - but never one still awaiting subjective grading, so a
 // review that takes longer than that doesn't lose the student's answers out from under the admin.

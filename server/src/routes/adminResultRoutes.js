@@ -3,6 +3,7 @@ import Result from '../models/Result.js';
 import Paper from '../models/Paper.js';
 import Admin from '../models/Admin.js';
 import AllowedRollNumber from '../models/AllowedRollNumber.js';
+import Attempt from '../models/Attempt.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import httpError from '../utils/httpError.js';
 import rankResults from '../utils/rankResults.js';
@@ -12,6 +13,12 @@ import { ownerFilter } from '../utils/adminFilter.js';
 import displayName from '../utils/displayName.js';
 
 const r = Router();
+
+async function assignedTeacherAdminIdForRoll(rollNumber) {
+  if (!rollNumber) return null;
+  const allowed = await AllowedRollNumber.findOne({ rollNumber: String(rollNumber).toUpperCase() }).select('adminId').lean();
+  return allowed?.adminId ? String(allowed.adminId) : null;
+}
 
 // Helper: get the paper codes this admin owns. Super-admin: null (no restriction).
 async function adminPaperCodes(req) {
@@ -61,6 +68,71 @@ r.get('/students/:roll', asyncHandler(async (req, res) => {
     teacher: teacherDoc ? { id: teacherDoc._id, name: displayName(teacherDoc) } : null,
     results: results.map(scoreFields)
   });
+}));
+
+r.get('/suspended', asyncHandler(async (req, res) => {
+  const codes = await adminPaperCodes(req);
+  const match = { submitted: false, examStatus: 'suspended' };
+  if (codes !== null) match.paperCode = { $in: codes };
+  const attempts = await Attempt.find(match).sort({ suspendedAt: -1 }).lean();
+  const teacherById = new Map();
+  const teacherIds = [...new Set(attempts.map(a => (a.teacherId ? String(a.teacherId) : null)).filter(Boolean))];
+  if (teacherIds.length) {
+    const docs = await Admin.find({ _id: { $in: teacherIds } }).select('_id name email').lean();
+    docs.forEach(doc => teacherById.set(String(doc._id), doc));
+  }
+  if (!req.admin.isSuper) {
+    const admin = await Admin.findById(req.admin.adminId).select('name email').lean();
+    if (admin) teacherById.set(String(admin._id), admin);
+  }
+  const rows = await Promise.all(attempts.map(async a => {
+    const assignedTeacherId = await assignedTeacherAdminIdForRoll(a.roll);
+    const assignedTeacher = assignedTeacherId ? teacherById.get(String(assignedTeacherId)) || null : null;
+    return {
+      _id: a._id,
+      attemptId: a._id,
+      studentName: a.name,
+      studentEmail: a.email,
+      paperTitle: a.paperTitle,
+      paperCode: a.paperCode,
+      tabSwitchCount: a.tabSwitchCount || 0,
+      suspendedAt: a.suspendedAt,
+      suspensionReason: a.suspensionReason || 'Tab switch limit reached',
+      examStatus: a.examStatus || 'suspended',
+      remainingTime: a.qEnd ? Math.max(0, a.qEnd.getTime() - Date.now()) : 0,
+      teacherName: assignedTeacher?.name || a.teacherName || null,
+      teacherEmail: assignedTeacher?.email || null,
+      assignedTeacherId: assignedTeacherId || null,
+      adminId: a.adminId || null
+    };
+  }));
+  res.json(rows);
+}));
+
+r.post('/attempts/:id/resume', asyncHandler(async (req, res) => {
+  const a = await Attempt.findById(req.params.id);
+  if (!a || a.submitted) throw httpError(404, 'Attempt not found.');
+  const codes = await adminPaperCodes(req);
+  if (codes !== null && !codes.includes(a.paperCode)) throw httpError(403, 'You do not have permission to resume this exam.');
+  if (a.examStatus !== 'suspended') throw httpError(409, 'This attempt is not suspended.');
+  if (a.qEnd && Date.now() >= a.qEnd.getTime()) throw httpError(409, 'This exam deadline has already expired.');
+
+  const assignedTeacherId = await assignedTeacherAdminIdForRoll(a.roll);
+  if (!req.admin.isSuper && assignedTeacherId && String(assignedTeacherId) !== String(req.admin.adminId)) {
+    throw httpError(403, 'You are not assigned to this student and cannot resume their exam.');
+  }
+  if (!req.admin.isSuper && !assignedTeacherId) {
+    throw httpError(403, 'This student is not assigned to your roster.');
+  }
+
+  a.examStatus = 'in_progress';
+  a.resumedAt = new Date();
+  a.resumedBy = req.admin.isSuper ? null : req.admin.adminId;
+  a.suspensionReason = null;
+  a.suspendedAt = null;
+  a.tabSwitchCount = Math.max(a.tabSwitchCount || 0, 3);
+  await a.save();
+  res.json({ ok: true, examStatus: 'in_progress', attemptId: a._id, qEnd: a.qEnd });
 }));
 
 r.delete('/results/:id', asyncHandler(async (req, res) => {

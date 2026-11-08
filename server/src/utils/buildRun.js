@@ -7,9 +7,15 @@ export default function buildRun(questions, shuf) {
         rubric: q.rubric || '', keyConcepts: q.keyConcepts || [], modelAnswer: q.modelAnswer || ''
       };
     }
-    let order = q.options.map((_, k) => k);
+    const options = q.type === 'truefalse' ? (q.options && q.options.length === 2 ? q.options : ['True', 'False']) : q.options;
+    let order = options.map((_, k) => k);
     if (shuf) order = shuffle(order);
-    return { type: 'mcq', text: q.text, options: order.map(k => q.options[k]), correct: order.indexOf(q.correct) };
+    return {
+      type: q.type === 'truefalse' ? 'truefalse' : 'mcq',
+      text: q.text,
+      options: order.map(k => options[k]),
+      correct: order.indexOf(q.correct)
+    };
   });
   return shuf ? shuffle(run) : run;
 }

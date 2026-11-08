@@ -30,7 +30,7 @@ function assertOwns(attempt, req) {
 
 r.get('/papers/:code', asyncHandler(async (req, res) => {
   const p = await openPaper(req.params.code);
-  res.json({ code: p.code, title: p.title, perQ: p.perQ, count: p.questions.length, startsAt: p.startsAt, expiresAt: p.expiresAt });
+  res.json({ code: p.code, title: p.title, perQ: p.perQ, timingMode: p.timingMode || 'perQuestion', customDuration: p.customDuration || 0, count: p.questions.length, startsAt: p.startsAt, expiresAt: p.expiresAt });
 }));
 
 r.post('/papers/:code/start', asyncHandler(async (req, res) => {
@@ -76,6 +76,38 @@ r.post('/papers/:code/start', asyncHandler(async (req, res) => {
 // A student's own history: their past results (by roll - Result has no student ref, matching
 // its existing shape), any attempt they started but haven't submitted yet (to resume), and any
 // submitted attempt still awaiting subjective grading (no Result exists for those yet).
+
+r.post('/attempts/:id/violation', asyncHandler(async (req, res) => {
+  const a = await Attempt.findOne({ _id: req.params.id, submitted: false });
+  if (!a) throw httpError(404, 'Attempt not found.');
+  assertOwns(a, req);
+  if (a.examStatus === 'suspended') throw httpError(403, 'This examination is suspended. A teacher or owner must approve resume before continuing.');
+  if (a.qEnd && Date.now() >= a.qEnd.getTime()) throw httpError(409, 'This exam deadline has already expired.');
+
+  const history = a.violationHistory || [];
+  const last = history[history.length - 1];
+  if (last && last.source === 'tab_switch' && Date.now() - new Date(last.at).getTime() < 2000) {
+    return res.json({ ok: true, tabSwitchCount: a.tabSwitchCount || 0, examStatus: a.examStatus || 'in_progress', suspensionReason: a.suspensionReason || null });
+  }
+
+  const count = (a.tabSwitchCount || 0) + 1;
+  const base = {
+    tabSwitchCount: count,
+    violationHistory: [...history, { at: new Date(), count, reason: count >= 3 ? 'Tab switch limit reached' : 'Tab switch violation', source: 'tab_switch' }]
+  };
+
+  if (count >= 3) {
+    Object.assign(base, {
+      examStatus: 'suspended',
+      suspendedAt: new Date(),
+      suspensionReason: 'Your examination has been suspended because you exceeded the allowed tab-switch limit. Please contact your teacher or administrator.'
+    });
+  }
+
+  const saved = await Attempt.findOneAndUpdate({ _id: a._id, submitted: false }, base, { new: true });
+  res.json({ ok: true, tabSwitchCount: saved.tabSwitchCount || 0, examStatus: saved.examStatus || 'in_progress', suspensionReason: saved.suspensionReason || null, alert: count >= 3 ? 'suspended' : count === 2 ? 'final_warning' : 'warning' });
+}));
+
 r.get('/me/overview', asyncHandler(async (req, res) => {
   if (!req.student) throw httpError(401, 'Please log in.');
   const results = await Result.find({ roll: req.student.rollNumber }).sort({ createdAt: -1 }).lean();
@@ -92,13 +124,13 @@ r.get('/attempts/:id', asyncHandler(async (req, res) => {
   const a = await Attempt.findById(req.params.id);
   if (!a) throw httpError(404, 'Test not found.');
   assertOwns(a, req);
-  res.json(attemptPayload(a, { perQ: a.perQ }));
+  res.json({ ...attemptPayload(a, { perQ: a.perQ }), examStatus: a.examStatus || 'in_progress', tabSwitchCount: a.tabSwitchCount || 0, suspensionReason: a.suspensionReason || null });
 }));
 
 // Strict sequential navigation: a.idx is the only question that can be answered. Everything
 // before it is locked (answered or skipped), everything after it is unreachable until Next.
 // Requests naming any other index are rejected with the authoritative state so the client resyncs.
-const progress = a => ({ idx: a.idx, qEnd: a.qEnd, answers: a.answers, subjectiveText: a.subjectiveText || [], serverNow: Date.now() });
+const progress = a => ({ idx: a.idx, qEnd: a.qEnd, startedAt: a.startedAt, answers: a.answers, subjectiveText: a.subjectiveText || [], serverNow: Date.now(), examStatus: a.examStatus || 'in_progress', tabSwitchCount: a.tabSwitchCount || 0, suspensionReason: a.suspensionReason || null });
 async function openAttempt(req) {
   const a = await Attempt.findOne({ _id: req.params.id, submitted: false });
   if (!a) throw httpError(409, 'This test was already submitted or does not exist.');
@@ -127,6 +159,7 @@ async function conflict(id, res) {
 // re-checking it against a concurrently-moved frontier isn't needed for that write to stay valid.
 r.patch('/attempts/:id/answer', asyncHandler(async (req, res) => {
   const a = await openAttempt(req);
+  if (a.examStatus === 'suspended') throw httpError(403, 'This examination is suspended. Wait for teacher or owner approval before continuing.');
   const { idx, answer } = req.body || {};
   if (!Number.isInteger(idx) || idx < 0 || idx >= a.run.length) throw httpError(400, 'Invalid question.');
   const subjective = a.run[idx].type === 'subjective';
@@ -143,6 +176,7 @@ r.patch('/attempts/:id/answer', asyncHandler(async (req, res) => {
 
 r.patch('/attempts/:id/step', asyncHandler(async (req, res) => {
   const a = await openAttempt(req);
+  if (a.examStatus === 'suspended') throw httpError(403, 'This examination is suspended. Wait for teacher or owner approval before continuing.');
   const { idx, answer } = req.body || {};
   if (rejectStale(a, idx, res)) return;
   if (a.qEnd && Date.now() >= a.qEnd.getTime()) throw httpError(400, 'Time is up; submit the test instead.');
@@ -165,6 +199,7 @@ r.post('/attempts/:id/submit', asyncHandler(async (req, res) => {
   const a = await Attempt.findOne({ _id: req.params.id, submitted: false });
   if (!a) throw httpError(409, 'This test was already submitted or does not exist.');
   assertOwns(a, req);
+  if (a.examStatus === 'suspended') throw httpError(403, 'This examination is suspended. A teacher or owner must approve resume before you can submit.');
 
   const { answer } = req.body || {};
   const current = a.run[a.idx], inTime = !a.qEnd || Date.now() < a.qEnd.getTime();
