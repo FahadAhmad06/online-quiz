@@ -22,6 +22,7 @@ const nav = [
   { to: '/admin/reports', label: 'PDF Reports', icon: 'report' },
   { to: '/admin/schedule', label: 'Paper Schedule', icon: 'calendar' },
   { to: '/admin/retakes', label: 'Retake Requests', icon: 'retake' },
+  { to: '/admin/suspended', label: 'Resume Requests', icon: 'clock' },
   { to: '/admin/settings', label: 'Settings', icon: 'settings' }
 ];
 

@@ -3,10 +3,12 @@ import optionLabel from '../utils/optionLabel';
 import Icon from './Icon';
 
 const blankMcq = { type: 'mcq', text: '', options: ['', ''], correct: 0 };
+const blankTf = { type: 'truefalse', text: '', options: ['True', 'False'], correct: 0 };
 const blankSubjective = { type: 'subjective', text: '', maxMarks: '10', instructions: '', rubric: '', keyConcepts: '', modelAnswer: '' };
 
 function summary(q) {
   if (q.type === 'subjective') return 'Subjective · ' + q.maxMarks + ' marks';
+  if (q.type === 'truefalse') return 'Correct answer: ' + (q.correct === 0 ? 'True' : 'False');
   return 'Correct: ' + optionLabel(q.correct) + ') ' + q.options[q.correct];
 }
 
@@ -15,7 +17,11 @@ export default function QuestionBuilder({ questions, onChange }) {
   const [editing, setEditing] = useState(null); // index being edited, or null when adding
 
   const reset = () => { setF(blankMcq); setMsg(''); setEditing(null); };
-  const setType = type => setF(type === 'subjective' ? { ...blankSubjective, text: f.text } : { ...blankMcq, text: f.text });
+  const setType = type => {
+    if (type === 'subjective') return setF({ ...blankSubjective, text: f.text });
+    if (type === 'truefalse') return setF({ ...blankTf, text: f.text, correct: 0 });
+    return setF({ ...blankMcq, text: f.text, options: ['', ''], correct: 0 });
+  };
 
   const add = () => {
     if (!f.text.trim()) return setMsg('Enter the question text.');
@@ -27,6 +33,8 @@ export default function QuestionBuilder({ questions, onChange }) {
         type: 'subjective', text: f.text.trim(), maxMarks, instructions: f.instructions.trim(), rubric: f.rubric.trim(),
         keyConcepts: f.keyConcepts.split(',').map(s => s.trim()).filter(Boolean), modelAnswer: f.modelAnswer.trim()
       };
+    } else if (f.type === 'truefalse') {
+      q = { type: 'truefalse', text: f.text.trim(), options: ['True', 'False'], correct: Number(f.correct) === 1 ? 1 : 0 };
     } else {
       if (f.options.some(o => !o.trim())) return setMsg('Fill in every option.');
       q = { type: 'mcq', text: f.text.trim(), options: f.options.map(o => o.trim()), correct: f.correct };
@@ -36,9 +44,13 @@ export default function QuestionBuilder({ questions, onChange }) {
   };
   const startEdit = i => {
     const q = questions[i];
-    setF(q.type === 'subjective'
-      ? { type: 'subjective', text: q.text, maxMarks: String(q.maxMarks), instructions: q.instructions || '', rubric: q.rubric || '', keyConcepts: (q.keyConcepts || []).join(', '), modelAnswer: q.modelAnswer || '' }
-      : { type: 'mcq', text: q.text, options: [...q.options], correct: q.correct });
+    if (q.type === 'subjective') {
+      setF({ type: 'subjective', text: q.text, maxMarks: String(q.maxMarks), instructions: q.instructions || '', rubric: q.rubric || '', keyConcepts: (q.keyConcepts || []).join(', '), modelAnswer: q.modelAnswer || '' });
+    } else if (q.type === 'truefalse') {
+      setF({ type: 'truefalse', text: q.text, options: ['True', 'False'], correct: q.correct ?? 0 });
+    } else {
+      setF({ type: 'mcq', text: q.text, options: [...q.options], correct: q.correct });
+    }
     setEditing(i); setMsg('');
   };
   const remove = i => { onChange(questions.filter((_, k) => k !== i)); if (editing === i) reset(); else if (editing > i) setEditing(editing - 1); };
@@ -51,6 +63,7 @@ export default function QuestionBuilder({ questions, onChange }) {
         <div>
           <b>{i + 1}. {q.text}</b>
           {q.type === 'subjective' && <span className="badge info" style={{ marginLeft: 8 }}>Subjective</span>}
+          {q.type === 'truefalse' && <span className="badge info" style={{ marginLeft: 8 }}>True/False</span>}
           <div className="muted small-text">{summary(q)}</div>
         </div>
         <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}>
@@ -63,6 +76,7 @@ export default function QuestionBuilder({ questions, onChange }) {
       <h3>{editing === null ? 'Add a question' : 'Edit question ' + (editing + 1)}</h3>
       <div className="row" style={{ marginBottom: 10 }}>
         <label className="chk" style={{ margin: 0 }}><input type="radio" name="qtype" checked={f.type === 'mcq'} onChange={() => setType('mcq')} />Multiple choice</label>
+        <label className="chk" style={{ margin: 0 }}><input type="radio" name="qtype" checked={f.type === 'truefalse'} onChange={() => setType('truefalse')} />True / False</label>
         <label className="chk" style={{ margin: 0 }}><input type="radio" name="qtype" checked={f.type === 'subjective'} onChange={() => setType('subjective')} />Subjective (written answer)</label>
       </div>
       <textarea placeholder="Type the question" value={f.text} onChange={e => setF({ ...f, text: e.target.value })} aria-label="Question text" />
@@ -78,6 +92,12 @@ export default function QuestionBuilder({ questions, onChange }) {
         ))}
         <div className="row">
           {f.options.length < 4 && <button className="ghost" onClick={() => setF({ ...f, options: [...f.options, ''] })}><Icon name="plus" size={16} />Add option</button>}
+        </div>
+      </>) : f.type === 'truefalse' ? (<>
+        <p className="muted small-text">Choose the correct statement for this question.</p>
+        <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <label className="chk" style={{ margin: 0 }}><input type="radio" name="tf-corr" checked={f.correct === 0} onChange={() => setF({ ...f, correct: 0 })} />True</label>
+          <label className="chk" style={{ margin: 0 }}><input type="radio" name="tf-corr" checked={f.correct === 1} onChange={() => setF({ ...f, correct: 1 })} />False</label>
         </div>
       </>) : (<>
         <label className="field" htmlFor="qb-marks">Maximum marks</label>

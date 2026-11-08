@@ -5,7 +5,10 @@ import save from './save';
 export default function beginTest(p) {
   save('qr_test', {
     attemptId: p.attemptId, run: p.run, preview: !!p.preview, perQ: p.perQ,
+    timingMode: p.timingMode || 'perQuestion', customDuration: p.customDuration || 0,
     idx: p.idx, answers: p.answers, subjectiveText: p.subjectiveText || [], qEnd: p.qEnd ? new Date(p.qEnd).getTime() : 0,
+    startedAt: p.startedAt ? new Date(p.startedAt).getTime() : null,
+    examStatus: p.examStatus || 'in_progress', tabSwitchCount: p.tabSwitchCount || 0, suspensionReason: p.suspensionReason || null,
     skew: p.serverNow ? p.serverNow - Date.now() : 0
   }, sessionStorage);
 }

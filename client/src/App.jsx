@@ -28,6 +28,7 @@ import Rolls from './pages/admin/Rolls';
 import Students from './pages/admin/Students';
 import Schedule from './pages/admin/Schedule';
 import Retakes from './pages/admin/Retakes';
+import SuspendedExams from './pages/admin/SuspendedExams';
 import Settings from './pages/admin/Settings';
 import Subjective from './pages/admin/Subjective';
 import SubjectiveReview from './pages/admin/SubjectiveReview';
@@ -70,6 +71,7 @@ function Shell() {
           <Route path="teachers/:id" element={<RequireAdmin owner><TeacherProfile /></RequireAdmin>} />
           <Route path="schedule" element={<Schedule />} />
           <Route path="retakes" element={<Retakes />} />
+          <Route path="suspended" element={<SuspendedExams />} />
           <Route path="subjective" element={<Subjective />} />
           <Route path="subjective/:attemptId" element={<SubjectiveReview />} />
           <Route path="reports" element={<AdminReports />} />

@@ -8,7 +8,8 @@ import Icon from '../components/Icon';
 import ExamTimer from '../components/ExamTimer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import AnswerEditor from '../components/AnswerEditor';
-import { ConfirmDialog } from '../components/Feedback';
+import { ConfirmDialog, useToast } from '../components/Feedback';
+import usePoll, { POLL_SLOW } from '../hooks/usePoll';
 
 // Strict sequential exam, with one exception: subjective answers already reached stay revisable.
 // - idx is the server's frontier - the furthest-reached question - and only ever moves forward.
@@ -26,8 +27,15 @@ export default function Test() {
   const [err, setErr] = useState(''), [notice, setNotice] = useState(''), [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error (autosave of the viewed question)
   const [confirming, setConfirming] = useState(false);
-  const done = useRef(false), queue = useRef(Promise.resolve()), Tref = useRef(T), viewRef = useRef(view);
+  const [violationAlert, setViolationAlert] = useState(null);
+  const toast = useToast();
+  const done = useRef(false), queue = useRef(Promise.resolve()), Tref = useRef(T), viewRef = useRef(view), lastStatus = useRef(null);
   Tref.current = T; viewRef.current = view;
+
+  const statusPoll = usePoll(T?.attemptId ? '/attempts/' + T.attemptId : null, d => {
+    if (d?.examStatus === 'suspended') return POLL_SLOW;
+    return null;
+  });
 
   const update = t => { save('qr_test', t, sessionStorage); Tref.current = t; setT(t); };
   // Adopt the server's progress (from GET, step, answer, or a 409 body). Never moves backwards.
@@ -44,7 +52,15 @@ export default function Test() {
     const subjectiveText = p.idx === cur.idx && curText[cur.idx] && curText[cur.idx] !== serverText[p.idx]
       ? serverText.map((s, i) => i === p.idx ? curText[i] : s) // keep unsaved local typing on the same question
       : serverText;
-    update({ ...cur, idx: p.idx, answers, subjectiveText, qEnd: p.qEnd ? new Date(p.qEnd).getTime() : 0, skew: p.serverNow ? p.serverNow - Date.now() : cur.skew || 0 });
+    update({
+      ...cur,
+      idx: p.idx,
+      answers,
+      subjectiveText,
+      qEnd: p.qEnd ? new Date(p.qEnd).getTime() : 0,
+      startedAt: p.startedAt ? new Date(p.startedAt).getTime() : cur.startedAt || null,
+      skew: p.serverNow ? p.serverNow - Date.now() : cur.skew || 0
+    });
     setView(p.idx);
   };
   const conflict = e => {
@@ -56,7 +72,31 @@ export default function Test() {
   useEffect(() => { if (T) api('/attempts/' + T.attemptId).then(adopt).catch(() => {}); }, []);
 
   useEffect(() => {
-    if (!T?.perQ) return;
+    if (!T?.attemptId) return;
+    if (statusPoll.data && statusPoll.data.examStatus === 'suspended') {
+      if (lastStatus.current !== 'suspended') {
+        toast.bad('Your examination has been suspended because you exceeded the allowed tab-switch limit. Please contact your teacher or administrator.');
+        lastStatus.current = 'suspended';
+      }
+      setViolationAlert('Your examination has been suspended because you exceeded the allowed tab-switch limit. Please contact your teacher or administrator.');
+      setNotice('');
+      setErr('');
+      setT(t => ({ ...t, examStatus: 'suspended', suspensionReason: statusPoll.data.suspensionReason || t.suspensionReason || 'Your examination has been suspended because you exceeded the allowed tab-switch limit. Please contact your teacher or administrator.' }));
+      return;
+    }
+    if (statusPoll.data && statusPoll.data.examStatus === 'in_progress') {
+      if (lastStatus.current !== 'in_progress') {
+        toast.ok('Your examination has been resumed. You may continue where you left off.');
+        lastStatus.current = 'in_progress';
+      }
+      setViolationAlert(null);
+      setNotice('Your examination has been resumed. You may continue where you left off.');
+      setT(t => ({ ...t, examStatus: 'in_progress', suspensionReason: null, qEnd: t.qEnd || (statusPoll.data.qEnd ? new Date(statusPoll.data.qEnd).getTime() : t.qEnd) }));
+    }
+  }, [statusPoll.data, T?.attemptId, toast]);
+
+  useEffect(() => {
+    if (!T?.qEnd) return;
     const i = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(i);
   }, [!!T]);
@@ -67,7 +107,45 @@ export default function Test() {
     addEventListener('beforeunload', h); return () => removeEventListener('beforeunload', h);
   }, [saveState, saving]);
 
+  useEffect(() => {
+    const onVisibility = () => {
+      if (!T || done.current || T.examStatus === 'suspended') return;
+      if (document.visibilityState === 'hidden') {
+        api('/attempts/' + T.attemptId + '/violation', { method: 'POST' }).then(r => {
+          setT(t => ({ ...t, tabSwitchCount: r.tabSwitchCount || 0, examStatus: r.examStatus || t.examStatus, suspensionReason: r.suspensionReason || t.suspensionReason }));
+          const nextCount = Math.min((r.tabSwitchCount || 0), tabSwitchLimit);
+          const currentWarning = `${nextCount}/${tabSwitchLimit}`;
+          if (r.alert === 'warning') {
+            toast.bad(`Tab switch warning ${currentWarning}. Remaining ${formatClock(remainingMs)} left out of ${formatClock(totalDurationMs)} total.`);
+            setNotice(`Tab switch warning ${currentWarning}. Remaining ${formatClock(remainingMs)} left out of ${formatClock(totalDurationMs)} total.`);
+          }
+          if (r.alert === 'final_warning') {
+            toast.bad(`Final warning: ${currentWarning}. Another tab switch will suspend this examination. Remaining ${formatClock(remainingMs)} left out of ${formatClock(totalDurationMs)} total.`);
+            setNotice(`Final warning: ${currentWarning}. Another tab switch will suspend this examination. Remaining ${formatClock(remainingMs)} left out of ${formatClock(totalDurationMs)} total.`);
+          }
+          if (r.alert === 'suspended') {
+            toast.bad(`Tab switch limit reached: ${currentWarning}. Examination suspended. Remaining ${formatClock(remainingMs)} left out of ${formatClock(totalDurationMs)} total.`);
+            setViolationAlert('Your examination has been suspended because you exceeded the allowed tab-switch limit. Please contact your teacher or administrator.');
+            setNotice('');
+            setErr('');
+          }
+        }).catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onVisibility);
+    return () => { document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('blur', onVisibility); };
+  }, [T?.attemptId, T?.examStatus, toast]);
+
   const currentAnswer = t => t.run[t.idx].type === 'subjective' ? (t.subjectiveText[t.idx] || '') : t.answers[t.idx];
+  const formatClock = ms => {
+    const abs = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(abs / 3600);
+    const m = Math.floor((abs % 3600) / 60);
+    const s = abs % 60;
+    return h > 0 ? [h, m, s].map(v => String(v).padStart(2, '0')).join(':') : [m, s].map(v => String(v).padStart(2, '0')).join(':');
+  };
+  const tabSwitchLimit = 3;
 
   const finish = async t => {
     if (done.current) return;
@@ -135,7 +213,7 @@ export default function Test() {
 
   // The pool running out ends the whole test (auto-submit, no confirmation), from whatever question.
   const serverNow = now + (T?.skew || 0);
-  useEffect(() => { if (T && T.perQ && !done.current && !saving && !err && serverNow >= T.qEnd) finish(T); });
+  useEffect(() => { if (T && T.qEnd && !done.current && !saving && !err && serverNow >= T.qEnd) finish(T); });
   // Keyboard shortcut: A–D or 1–4 picks an option (same path as clicking). Next is never keyboard-triggered,
   // so a stray key can't lock a question. Only live when the viewed question is the MCQ frontier -
   // you can never be viewing an MCQ that isn't the frontier (Previous only ever lands on subjective).
@@ -144,16 +222,33 @@ export default function Test() {
       if (!T || confirming || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
       if (view !== T.idx || T.run[T.idx].type === 'subjective') return;
       const k = e.key.toLowerCase(), i = 'abcd'.indexOf(k) >= 0 ? 'abcd'.indexOf(k) : '1234'.indexOf(k);
-      if (i >= 0 && i < T.run[T.idx].options.length && !(T.perQ && serverNow >= T.qEnd)) choose(i);
+      if (i >= 0 && i < T.run[T.idx].options.length && !(T.qEnd && serverNow >= T.qEnd)) choose(i);
     };
     addEventListener('keydown', key); return () => removeEventListener('keydown', key);
   });
   if (!T) return <Navigate to="/" replace />;
 
+  if (T.examStatus === 'suspended' || violationAlert) {
+    return (
+      <div className="exam fade-up">
+        <div className="card exam-card" style={{ padding: 32, textAlign: 'center' }}>
+          <h2 style={{ marginBottom: 12 }}>Examination suspended</h2>
+          <p className="muted" style={{ maxWidth: 620, margin: '0 auto 12px auto', lineHeight: 1.6 }}>
+            {T.suspensionReason || violationAlert || 'Your examination has been suspended because you exceeded the allowed tab-switch limit. Please contact your teacher or administrator.'}
+          </p>
+          <p className="muted small-text">Teacher or owner approval is required before you can continue this examination.</p>
+        </div>
+      </div>
+    );
+  }
+
   const n = T.run.length, q = T.run[view], sel = T.answers[view], atFrontier = view === T.idx, frontierLast = T.idx === n - 1;
   const subjective = q.type === 'subjective';
+  const totalDurationMs = T.startedAt && T.qEnd ? Math.max(0, T.qEnd - T.startedAt) : (T.customDuration ? T.customDuration * 1000 : (T.perQ && T.run.length ? T.perQ * T.run.length * 1000 : 0));
+  const remainingMs = T.qEnd ? Math.max(0, T.qEnd - serverNow) : 0;
   const r = Math.max(0, Math.ceil((T.qEnd - serverNow) / 1000));
-  const expired = T.perQ && serverNow >= T.qEnd;
+  const expired = !!T.qEnd && serverNow >= T.qEnd;
+  const tabSwitchCount = T.tabSwitchCount || 0;
   const unanswered = T.run.reduce((n2, qq, i) => n2 + ((qq.type === 'subjective' ? !!(T.subjectiveText[i] || '').trim() : T.answers[i] >= 0) ? 0 : 1), 0);
   const canGoPrev = subjective && view > 0 && T.run[view - 1].type === 'subjective';
   const goPrev = () => { if (canGoPrev && !saving && !done.current) setView(v => v - 1); };
@@ -171,7 +266,7 @@ export default function Test() {
             <h2 style={{ margin: 0 }}>Question {view + 1} <span className="muted" style={{ fontWeight: 500 }}>of {n}</span></h2>
             <span className="muted small-text">{T.idx} locked · {n - T.idx - 1} to go</span>
           </div>
-          {T.perQ > 0 && <ExamTimer remaining={r} />}
+          {!!T.qEnd && <ExamTimer remaining={r} />}
         </div>
         <div className="bar" aria-hidden="true"><i style={{ width: (T.idx + 1) / n * 100 + '%' }} /></div>
       </div>

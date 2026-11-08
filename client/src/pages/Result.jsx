@@ -55,7 +55,7 @@ function PendingResult({ R, live, onRefresh }) {
         <span className="badge warn"><Icon name="clock" size={14} />Awaiting final review</span>
         <h1>Your answers have been submitted</h1>
         <p className="muted">{R.name ? R.name + ', y' : 'Y'}our subjective answers are graded by AI and then approved by your teacher. You'll see final marks and feedback once they're approved.</p>
-        {R.mcqTotal > 0 && <p className="muted small-text">Multiple-choice questions so far: <b style={{ color: 'var(--ink)' }}>{R.mcqCorrect}/{R.mcqTotal}</b> correct (final total includes subjective marks once approved).</p>}
+        {R.mcqTotal > 0 && <p className="muted small-text">Objective questions so far (MCQ + True/False): <b style={{ color: 'var(--ink)' }}>{R.mcqCorrect}/{R.mcqTotal}</b> correct (final total includes subjective marks once approved).</p>}
         {p && (
           <div className="eval-progress">
             <div className="small-text"><b>{p.evaluated} of {p.total}</b> answer{p.total === 1 ? '' : 's'} evaluated{p.approved ? ' · ' + p.approved + ' approved' : ''}{p.failed ? ' · ' + p.failed + ' failed' : ''}</div>

@@ -11,6 +11,8 @@ import ErrorBox from '../../components/ErrorBox';
 import EmptyState from '../../components/EmptyState';
 import Loading from '../../components/Loading';
 import { AreaChart, BarChart } from '../../components/Charts';
+import { useConfirm, useToast } from '../../components/Feedback';
+import api from '../../utils/api';
 
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const activityIcon = { student: ['user', 'purple'], result: ['checkCircle', 'green'], paper: ['quiz', 'blue'], retake: ['retake', 'amber'] };
@@ -146,8 +148,24 @@ function OwnerSection() {
 /* ---------- Teacher dashboard (also shown at the TOP for the owner) ---------- */
 function TeacherDashboard({ name, owner = false }) {
   const [now, setNow] = useState(new Date());
+  const [suspendState, setSuspendState] = useState(null);
+  const toast = useToast();
+  const confirm = useConfirm();
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(i); }, []);
   const state = useFetch('/admin/stats?tz=' + encodeURIComponent(tz)), d = state.data;
+  const suspended = useFetch('/admin/suspended');
+
+  const resumeExam = async attempt => {
+    if (!(await confirm({ title: 'Allow this student to resume?', message: 'Resume ' + attempt.studentName + ' on ' + attempt.paperTitle + '? The original deadline remains unchanged.', confirmText: 'Resume exam', danger: false }))) return;
+    try {
+      const res = await api('/admin/attempts/' + attempt._id + '/resume', { method: 'POST' });
+      setSuspendState(res);
+      suspended.reload();
+      toast.ok('Examination resumed for ' + attempt.studentName + '.');
+    } catch (e) {
+      toast.bad(e.message);
+    }
+  };
 
   return (<>
     <div className="page-head">
@@ -244,6 +262,28 @@ function TeacherDashboard({ name, owner = false }) {
           ? <EmptyState icon="chart">No scores yet.</EmptyState>
           : <BarChart caption="Number of attempts per score range" valueName="Attempts"
               data={d.buckets.map(b => ({ label: b.label, value: b.count, tip: 'scored ' + b.label }))} />}
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <h2><span className="hicon"><Icon name="alert" size={16} /></span>Suspended exams</h2>
+        </div>
+        {!suspended.data ? <Skeleton h={220} /> : !suspended.data.length
+          ? <EmptyState icon="clock">No suspended examinations.</EmptyState>
+          : <div className="wrapx"><table>
+              <thead><tr><th>Student</th><th>Quiz</th><th>Violations</th><th>Suspended</th><th>Reason</th><th>Remaining</th><th>Action</th></tr></thead>
+              <tbody>{suspended.data.map(a => (
+                <tr key={a._id}>
+                  <td><b>{a.studentName}</b><div className="muted small-text">{a.studentEmail}</div></td>
+                  <td><b>{a.paperTitle}</b><div className="muted small-text">{a.paperCode}</div></td>
+                  <td>{a.tabSwitchCount}</td>
+                  <td>{new Date(a.suspendedAt).toLocaleString()}</td>
+                  <td className="wrap" style={{ maxWidth: 240 }}>{a.suspensionReason}</td>
+                  <td>{Math.ceil((a.remainingTime || 0) / 60000)} min</td>
+                  <td><button className="small" onClick={() => resumeExam(a)}>Allow resume</button></td>
+                </tr>
+              ))}</tbody>
+            </table></div>}
       </div>
 
       <div className="card">
