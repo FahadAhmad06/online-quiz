@@ -45,7 +45,7 @@ function Shell() {
     : ['/dashboard', '/my-reports', '/result', '/student-login', '/student-register', '/admin-login'].includes(pathname) ? 'wide'
       : pathname === '/test' ? 'exam' : 'narrow';
   return (<>
-    {!admin && <Header theme={theme} onToggleTheme={toggleTheme} />}
+    {!admin && pathname !== '/test' && <Header theme={theme} onToggleTheme={toggleTheme} />}
     <main className={width + (admin ? '' : ' public')}>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -55,7 +55,7 @@ function Shell() {
         <Route path="/dashboard" element={<RequireStudent><StudentDashboard /></RequireStudent>} />
         <Route path="/my-reports" element={<RequireStudent><StudentReports /></RequireStudent>} />
         <Route path="/join/:code" element={<RequireStudent><Join /></RequireStudent>} />
-        <Route path="/test" element={<Test />} />
+        <Route path="/test" element={<Test theme={theme} onToggleTheme={toggleTheme} />} />
         <Route path="/result" element={<Result />} />
         <Route path="/admin" element={<RequireAdmin><AdminLayout theme={theme} onToggleTheme={toggleTheme} /></RequireAdmin>}>
           <Route index element={<Dashboard />} />

@@ -8,6 +8,7 @@ export default function attemptPayload(attempt, paper) {
     customDuration: a.customDuration ?? paper.customDuration ?? 0, preview: a.preview,
     idx: a.idx, answers: a.answers, subjectiveText: a.subjectiveText || [], qEnd: a.qEnd, startedAt: a.startedAt,
     serverNow: Date.now(),
+    title: a.paperTitle || paper.title || 'Quiz',
     run: a.run.map(q => q.type === 'subjective'
       ? { type: 'subjective', text: q.text, maxMarks: q.maxMarks, instructions: q.instructions }
       : { type: q.type || 'mcq', text: q.text, options: q.options })

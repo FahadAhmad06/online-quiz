@@ -14,7 +14,10 @@ function totalMarks(questions) {
 export default function paperSummary(p, submissions = 0) {
   return {
     _id: p._id, code: p.code, title: p.title, perQ: p.perQ, timingMode: p.timingMode || 'perQuestion',
-    customDuration: p.customDuration || 0, shuffle: p.shuffle,
+    customDuration: p.customDuration || 0,
+    shuffleQuestions: !!(p.shuffleQuestions ?? p.shuffle ?? false),
+    shuffleOptions: !!(p.shuffleOptions ?? false),
+    shuffle: !!(p.shuffleQuestions ?? p.shuffle ?? false) || !!(p.shuffleOptions ?? false),
     startsAt: p.startsAt, expiresAt: p.expiresAt,
     createdAt: p.createdAt, questionCount: p.questions.length, totalMarks: totalMarks(p.questions), submissions,
     open: isOpen(p), status: paperStatus(p)

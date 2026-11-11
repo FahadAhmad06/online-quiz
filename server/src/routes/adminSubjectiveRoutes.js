@@ -8,6 +8,7 @@ import { queueAttemptEvaluations, processPending, finalizeIfReady, limiter } fro
 import { summary } from '../services/evalMetrics.js';
 import { clearQuotaBlock, providerSnapshot } from '../services/aiEvaluator.js';
 import { ownerFilter } from '../utils/adminFilter.js';
+import { waitUntil } from '@vercel/functions';
 
 const r = Router(); // mounted behind requireAdmin
 const STATUSES = ['pending', 'evaluating', 'awaiting_review', 'approved', 'manual_review', 'failed'];
@@ -173,7 +174,9 @@ r.post('/subjective/submissions/:attemptId/:idx/re-evaluate', asyncHandler(async
   a.needsGrading = true; // in case approving it had already finalized the attempt's Result
   await a.save();
   clearQuotaBlock(); // an explicit admin request always gets a real attempt
-  queueAttemptEvaluations(attemptId).catch(() => {});
+  const grading = queueAttemptEvaluations(attemptId)
+    .catch(e => console.error('[eval] re-evaluation queue failed:', e.message));
+  waitUntil(grading);
   res.json({ ok: true, status: 'pending' });
 }));
 

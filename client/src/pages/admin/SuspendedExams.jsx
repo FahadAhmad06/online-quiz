@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useFetch from '../../hooks/useFetch';
 import PageHeader from '../../components/PageHeader';
 import EmptyState from '../../components/EmptyState';
@@ -13,6 +13,13 @@ export default function SuspendedExams() {
   const confirm = useConfirm();
   const toast = useToast();
   const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      suspended.reload();
+    }, 15000);
+    return () => clearInterval(id);
+  }, [suspended.reload]);
 
   const resumeExam = async attempt => {
     if (!(await confirm({
@@ -31,6 +38,40 @@ export default function SuspendedExams() {
       toast.bad(e.message);
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const deleteRequest = async attempt => {
+    if (!(await confirm({
+      title: 'Delete this resume request?',
+      message: 'Remove the suspended exam request for ' + attempt.studentName + ' on ' + attempt.paperTitle + '? This action cannot be undone.',
+      confirmText: 'Delete request',
+      danger: true
+    }))) return;
+
+    try {
+      await api('/admin/attempts/' + attempt._id, { method: 'DELETE' });
+      suspended.reload();
+      toast.ok('Resume request deleted.');
+    } catch (e) {
+      toast.bad(e.message);
+    }
+  };
+
+  const deleteAllRequests = async () => {
+    if (!(await confirm({
+      title: 'Delete all resume requests?',
+      message: 'This will permanently remove every suspended exam request currently waiting for review.',
+      confirmText: 'Delete all',
+      danger: true
+    }))) return;
+
+    try {
+      await api('/admin/attempts/suspended', { method: 'DELETE' });
+      suspended.reload();
+      toast.ok('All resume requests deleted.');
+    } catch (e) {
+      toast.bad(e.message);
     }
   };
 
@@ -61,9 +102,14 @@ export default function SuspendedExams() {
                 <td className="wrap" style={{ maxWidth: 260 }}>{a.suspensionReason}</td>
                 <td>{Math.max(0, Math.ceil((a.remainingTime || 0) / 60000))} min</td>
                 <td>
-                  <button className="small" disabled={busyId === a._id} onClick={() => resumeExam(a)}>
-                    {busyId === a._id ? 'Resuming…' : 'Allow resume'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="small" disabled={busyId === a._id} onClick={() => resumeExam(a)}>
+                      {busyId === a._id ? 'Resuming…' : 'Allow resume'}
+                    </button>
+                    <button className="danger small" onClick={() => deleteRequest(a)}>
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}</tbody>

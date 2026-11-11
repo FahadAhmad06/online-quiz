@@ -13,7 +13,7 @@ import validateQuestions from '../utils/validateQuestions.js';
 import rankResults from '../utils/rankResults.js';
 import paperStats from '../utils/paperStats.js';
 import paperSummary from '../utils/paperSummary.js';
-import buildRun from '../utils/buildRun.js';
+import buildRun, { normalizeShuffleSettings } from '../utils/buildRun.js';
 import attemptPayload from '../utils/attemptPayload.js';
 import newAttemptFields from '../utils/newAttemptFields.js';
 import { ownerFilter, adminObjectId, isOwner } from '../utils/adminFilter.js';
@@ -129,7 +129,11 @@ r.patch('/papers/:id', asyncHandler(async (req, res) => {
   if (timingMode === 'customTotal' && (!Number.isFinite(customDuration) || customDuration <= 0 || customDuration > 86400 * 365)) throw httpError(400, 'Custom duration must be a positive value up to one year.');
   const qErr = validateQuestions(b.questions);
   if (qErr) throw httpError(400, qErr);
-  p.title = title; p.perQ = Math.round(perQ); p.timingMode = timingMode; p.customDuration = timingMode === 'customTotal' ? Math.round(customDuration) : 0; p.shuffle = b.shuffle !== false;
+  const shuffleSettings = normalizeShuffleSettings(b);
+  p.title = title; p.perQ = Math.round(perQ); p.timingMode = timingMode; p.customDuration = timingMode === 'customTotal' ? Math.round(customDuration) : 0;
+  p.shuffleQuestions = shuffleSettings.shuffleQuestions;
+  p.shuffleOptions = shuffleSettings.shuffleOptions;
+  p.shuffle = shuffleSettings.shuffleQuestions || shuffleSettings.shuffleOptions;
   p.questions = b.questions.map(cleanQuestion);
   await p.save();
   res.json(paperSummary(p.toObject()));
@@ -163,8 +167,12 @@ r.post('/papers', asyncHandler(async (req, res) => {
   if (b.startsAt) { startsAt = new Date(b.startsAt); if (isNaN(startsAt)) throw httpError(400, 'Invalid start time.'); }
   const qErr = validateQuestions(b.questions);
   if (qErr) throw httpError(400, qErr);
+  const shuffleSettings = normalizeShuffleSettings(b);
   const paper = await Paper.create({
-    code: await generateCode(), title, perQ: Math.round(perQ), timingMode, customDuration: timingMode === 'customTotal' ? Math.round(customDuration) : 0, shuffle: b.shuffle !== false,
+    code: await generateCode(), title, perQ: Math.round(perQ), timingMode, customDuration: timingMode === 'customTotal' ? Math.round(customDuration) : 0,
+    shuffleQuestions: shuffleSettings.shuffleQuestions,
+    shuffleOptions: shuffleSettings.shuffleOptions,
+    shuffle: shuffleSettings.shuffleQuestions || shuffleSettings.shuffleOptions,
     startsAt, expiresAt: dur === null ? null : new Date(Date.now() + dur), createdBy: req.admin.email,
     adminId: adminObjectId(req), // always set from the verified JWT, never from the request body
     questions: b.questions.map(cleanQuestion)
@@ -234,7 +242,10 @@ r.post('/papers/:id/schedule', asyncHandler(async (req, res) => {
 
 r.post('/papers/:id/preview', asyncHandler(async (req, res) => {
   const p = (await findPaper(req.params.id, req)).toObject();
-  const run = buildRun(p.questions, p.shuffle);
+  const run = buildRun(p.questions, {
+    shuffleQuestions: !!(p.shuffleQuestions ?? p.shuffle ?? false),
+    shuffleOptions: !!(p.shuffleOptions ?? false)
+  });
   const attempt = await Attempt.create({
     paperCode: p.code, paperTitle: p.title, name: 'Admin', roll: '-', email: req.admin.email, preview: true, run, ...newAttemptFields(p, run)
   });

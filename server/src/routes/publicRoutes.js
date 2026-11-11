@@ -10,6 +10,7 @@ import buildRun from '../utils/buildRun.js';
 import attemptPayload from '../utils/attemptPayload.js';
 import newAttemptFields from '../utils/newAttemptFields.js';
 import { queueAttemptEvaluations, retryFailed } from '../services/subjectiveEvaluation.js';
+import { waitUntil } from '@vercel/functions';
 import config from '../config.js';
 
 const r = Router();
@@ -52,7 +53,10 @@ r.post('/papers/:code/start', asyncHandler(async (req, res) => {
     attemptNumber = existing.attemptNumber + 1;
   }
 
-  const run = buildRun(p.questions, p.shuffle);
+  const run = buildRun(p.questions, {
+    shuffleQuestions: !!(p.shuffleQuestions ?? p.shuffle ?? false),
+    shuffleOptions: !!(p.shuffleOptions ?? false)
+  });
   // A first attempt on a scheduled paper shares the paper's fixed window (see newAttemptFields).
   const fields = newAttemptFields(p, run, { fromSchedule: attemptNumber === 1 });
   if (fields.qEnd && fields.qEnd.getTime() <= Date.now()) {
@@ -110,6 +114,13 @@ r.post('/attempts/:id/violation', asyncHandler(async (req, res) => {
 
 r.get('/me/overview', asyncHandler(async (req, res) => {
   if (!req.student) throw httpError(401, 'Please log in.');
+  const now = new Date();
+  await Attempt.deleteMany({
+    student: req.student._id,
+    preview: false,
+    submitted: false,
+    qEnd: { $ne: null, $lte: now }
+  });
   const results = await Result.find({ roll: req.student.rollNumber }).sort({ createdAt: -1 }).lean();
   const inProgress = await Attempt.find({ student: req.student._id, preview: false, submitted: false })
     .select('paperCode paperTitle startedAt').sort({ startedAt: -1 }).lean();
@@ -121,6 +132,12 @@ r.get('/me/overview', asyncHandler(async (req, res) => {
 }));
 
 r.get('/attempts/:id', asyncHandler(async (req, res) => {
+  const now = new Date();
+  const expired = await Attempt.findOne({ _id: req.params.id, submitted: false, qEnd: { $ne: null, $lte: now } });
+  if (expired) {
+    await Attempt.deleteOne({ _id: req.params.id });
+    throw httpError(410, 'This exam time has expired and the attempt was removed.');
+  }
   const a = await Attempt.findById(req.params.id);
   if (!a) throw httpError(404, 'Test not found.');
   assertOwns(a, req);
@@ -132,6 +149,12 @@ r.get('/attempts/:id', asyncHandler(async (req, res) => {
 // Requests naming any other index are rejected with the authoritative state so the client resyncs.
 const progress = a => ({ idx: a.idx, qEnd: a.qEnd, startedAt: a.startedAt, answers: a.answers, subjectiveText: a.subjectiveText || [], serverNow: Date.now(), examStatus: a.examStatus || 'in_progress', tabSwitchCount: a.tabSwitchCount || 0, suspensionReason: a.suspensionReason || null });
 async function openAttempt(req) {
+  const now = new Date();
+  const expired = await Attempt.findOne({ _id: req.params.id, submitted: false, qEnd: { $ne: null, $lte: now } });
+  if (expired) {
+    await Attempt.deleteOne({ _id: req.params.id });
+    throw httpError(410, 'This exam time has expired and the attempt was removed.');
+  }
   const a = await Attempt.findOne({ _id: req.params.id, submitted: false });
   if (!a) throw httpError(409, 'This test was already submitted or does not exist.');
   assertOwns(a, req);
@@ -228,10 +251,13 @@ r.post('/attempts/:id/submit', asyncHandler(async (req, res) => {
   }
 
   // Has subjective questions: no Result yet - the final mark waits for admin-approved grading.
-  // Previews are graded by nobody and never produce a Result, so skip AI evaluation for them too.
+  // Preview attempts use the same evaluation lifecycle so local preview testing cannot leave
+  // pending subjective records stranded outside the worker.
   const evaluations = subjIdx.map(idx => ({ idx, status: 'pending', maxMarks: claimed.run[idx].maxMarks }));
   await Attempt.updateOne({ _id: claimed._id }, { needsGrading: true, evaluations });
-  if (!claimed.preview) queueAttemptEvaluations(String(claimed._id)).catch(() => {});
+  const grading = queueAttemptEvaluations(String(claimed._id))
+    .catch(e => console.error('[eval] submission queue failed:', e.message));
+  waitUntil(grading);
 
   res.json({
     pending: true, attemptId: claimed._id, mcqCorrect, mcqTotal, subjectiveCount: subjIdx.length,
@@ -300,6 +326,9 @@ r.post('/attempts/:id/subjective/:idx/retry', asyncHandler(async (req, res) => {
   assertOwns(a, req);
   const ok = await retryFailed(a._id, Number(req.params.idx), { transientOnly: true, by: 'student' });
   if (!ok) throw httpError(409, 'This answer cannot be retried right now. Your teacher will review it.');
+  const grading = queueAttemptEvaluations(String(a._id))
+    .catch(e => console.error('[eval] student retry queue failed:', e.message));
+  waitUntil(grading);
   res.json({ ok: true, status: 'pending' });
 }));
 

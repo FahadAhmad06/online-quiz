@@ -71,6 +71,13 @@ r.get('/students/:roll', asyncHandler(async (req, res) => {
 }));
 
 r.get('/suspended', asyncHandler(async (req, res) => {
+  const now = new Date();
+  await Attempt.deleteMany({
+    submitted: false,
+    qEnd: { $ne: null, $lte: now },
+    examStatus: { $in: ['in_progress', 'suspended'] }
+  });
+
   const codes = await adminPaperCodes(req);
   const match = { submitted: false, examStatus: 'suspended' };
   if (codes !== null) match.paperCode = { $in: codes };
@@ -133,6 +140,31 @@ r.post('/attempts/:id/resume', asyncHandler(async (req, res) => {
   a.tabSwitchCount = Math.max(a.tabSwitchCount || 0, 3);
   await a.save();
   res.json({ ok: true, examStatus: 'in_progress', attemptId: a._id, qEnd: a.qEnd });
+}));
+
+r.delete('/attempts/:id', asyncHandler(async (req, res) => {
+  const a = await Attempt.findById(req.params.id);
+  if (!a) {
+    return res.json({ ok: true, deleted: false, reason: 'not_found' });
+  }
+  if (a.submitted) {
+    return res.json({ ok: true, deleted: false, reason: 'already_submitted' });
+  }
+  const codes = await adminPaperCodes(req);
+  if (codes !== null && !codes.includes(a.paperCode)) throw httpError(403, 'You do not have permission to delete this exam request.');
+  const deleted = await Attempt.deleteOne({ _id: req.params.id });
+  if (!deleted.deletedCount) {
+    return res.json({ ok: true, deleted: false, reason: 'not_found' });
+  }
+  res.json({ ok: true, deleted: true });
+}));
+
+r.delete('/attempts/suspended', asyncHandler(async (req, res) => {
+  const codes = await adminPaperCodes(req);
+  const match = { submitted: false, examStatus: 'suspended' };
+  if (codes !== null) match.paperCode = { $in: codes };
+  const deleted = await Attempt.deleteMany(match);
+  res.json({ ok: true, deletedCount: deleted.deletedCount || 0 });
 }));
 
 r.delete('/results/:id', asyncHandler(async (req, res) => {

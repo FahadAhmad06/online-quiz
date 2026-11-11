@@ -30,8 +30,8 @@ export default function QuestionNavigator({ count, idx, view, answers, run, subj
     </ol>
     <div className="qlegend" aria-hidden="true">
       <span><i className="current" />Current</span>
-      <span><i className="answered"><Icon name="lock" strokeWidth={3} /></i>Answered · locked</span>
-      <span><i className="answered" />Answered · revisable</span>
+      <span><i className="answered"><Icon name="check" strokeWidth={3} /></i>Answered</span>
+      <span><i className="skipped" />Not Answered</span>
     </div>
   </>);
 }

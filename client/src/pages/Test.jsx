@@ -19,15 +19,17 @@ import usePoll, { POLL_SLOW } from '../hooks/usePoll';
 // - `view` is what's on screen; it trails `idx` while revising, and snaps back to `idx` (the live
 //   question) whenever the frontier actually advances.
 // - Any request naming a locked/future question gets 409 + the real state, which we adopt.
-export default function Test() {
+export default function Test({ theme, onToggleTheme }) {
   const navigate = useNavigate();
   const [T, setT] = useState(() => load('qr_test', null, sessionStorage));
   const [view, setView] = useState(() => T?.idx ?? 0);
   const [now, setNow] = useState(Date.now());
   const [err, setErr] = useState(''), [notice, setNotice] = useState(''), [saving, setSaving] = useState(false);
+  const student = load('qr_student', null, sessionStorage);
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error (autosave of the viewed question)
   const [confirming, setConfirming] = useState(false);
   const [violationAlert, setViolationAlert] = useState(null);
+  const [mobileInfoOpen, setMobileInfoOpen] = useState(true);
   const toast = useToast();
   const done = useRef(false), queue = useRef(Promise.resolve()), Tref = useRef(T), viewRef = useRef(view), lastStatus = useRef(null);
   Tref.current = T; viewRef.current = view;
@@ -250,81 +252,169 @@ export default function Test() {
   const expired = !!T.qEnd && serverNow >= T.qEnd;
   const tabSwitchCount = T.tabSwitchCount || 0;
   const unanswered = T.run.reduce((n2, qq, i) => n2 + ((qq.type === 'subjective' ? !!(T.subjectiveText[i] || '').trim() : T.answers[i] >= 0) ? 0 : 1), 0);
+  const answered = T.run.filter((qq, i) => qq.type === 'subjective' ? !!(T.subjectiveText[i] || '').trim() : T.answers[i] >= 0).length;
+  const examTitle = T?.title || 'Quiz';
+  const studentName = student?.name || 'Student';
+  const studentRoll = student?.rollNumber || 'Roll not available';
+  const doLogout = () => {
+    sessionStorage.removeItem('qr_student');
+    sessionStorage.removeItem('qr_test');
+    navigate('/student-login');
+  };
   const canGoPrev = subjective && view > 0 && T.run[view - 1].type === 'subjective';
-  const goPrev = () => { if (canGoPrev && !saving && !done.current) setView(v => v - 1); };
+  const goPrev = () => { if (canGoPrev && !saving && !done.current) setView(v => v - 1); else if (!subjective && view > 0 && !saving && !done.current) setView(v => v - 1); };
   const goNext = () => {
     if (saving || done.current) return;
-    if (!atFrontier) return setView(v => Math.min(v + 1, T.idx)); // pure local navigation, already reached
+    if (!atFrontier) return setView(v => Math.min(v + 1, T.idx));
     expired ? finish(T) : next();
   };
   return (
     <div className="exam fade-up">
-      <div className="exam-bar">
-        <div className="exam-head">
-          <div>
-            {T.preview && <span className="badge info" style={{ marginBottom: 6 }}><Icon name="eye" />Admin preview</span>}
-            <h2 style={{ margin: 0 }}>Question {view + 1} <span className="muted" style={{ fontWeight: 500 }}>of {n}</span></h2>
-            <span className="muted small-text">{T.idx} locked · {n - T.idx - 1} to go</span>
+      <header className="exam-header">
+        <div className="exam-header-brand">
+          <span className="exam-header-mark"><Icon name="cap" size={18} /></span>
+          <div className="exam-header-copy">
+            <div className="exam-header-kicker">QuizRoom</div>
+            <div className="exam-header-title">{examTitle}</div>
           </div>
+        </div>
+
+        <div className="exam-header-timer">
           {!!T.qEnd && <ExamTimer remaining={r} />}
         </div>
-        <div className="bar" aria-hidden="true"><i style={{ width: (T.idx + 1) / n * 100 + '%' }} /></div>
-      </div>
 
-      <div className="card exam-card">
-      <QuestionNavigator count={n} idx={T.idx} view={view} answers={T.answers} run={T.run} subjectiveText={T.subjectiveText} />
-
-      <div className="qcard">
-        <span className="qlabel">Question {view + 1}{subjective && <span className="badge info" style={{ marginLeft: 8 }}>{q.maxMarks} marks</span>}{!atFrontier && <span className="badge warn" style={{ marginLeft: 8 }}>Revising</span>}</span>
-        <h2 className="qtext">{q.text}</h2>
-        {subjective ? (<>
-          {q.instructions && <p className="muted small-text" style={{ marginTop: -6 }}>{q.instructions}</p>}
-          <AnswerEditor value={T.subjectiveText[view] || ''} onChange={chooseText} disabled={saving || expired} />
-        </>) : (<>
-          <div role="radiogroup" aria-label={'Options for question ' + (view + 1)}>
-            {q.options.map((o, i) => (
-              <button key={i} role="radio" aria-checked={sel === i} className={'opt' + (sel === i ? ' sel' : '')} disabled={saving || expired}
-                onClick={() => choose(i)}>
-                <span className="k">{optionLabel(i)}</span><span>{o}</span>{sel === i && <span className="check"><Icon name="checkCircle" size={18} /></span>}
-              </button>
-            ))}
+        <div className="exam-student-box">
+          <div className="exam-student-avatar"><Icon name="user" size={18} /></div>
+          <div className="exam-student-meta">
+            <span className="exam-student-label">Student</span>
+            <strong>{studentName}</strong>
+            <small>{studentRoll}</small>
           </div>
-          <p className="muted small-text kbd-hint">Tip: press <kbd>A</kbd>–<kbd>{optionLabel(q.options.length - 1)}</kbd> to choose an option.</p>
-        </>)}
-      </div>
-
-      <div className="row exam-actions">
-        <span className={'save-state' + (saveState === 'error' ? ' bad' : '')} aria-live="polite">
-          {saveState === 'saving' && <><span className="spinner" />Saving your answer…</>}
-          {saveState === 'saved' && <><Icon name="check" size={15} />Answer saved</>}
-          {saveState === 'error' && <><Icon name="alert" size={15} />Not saved yet. It will be sent again shortly.</>}
-        </span>
-        <div className="row" style={{ gap: 8 }}>
-          {canGoPrev && <button className="ghost lg" onClick={goPrev} disabled={saving}><Icon name="chevronLeft" size={16} />Previous</button>}
-          <button className="lg" onClick={goNext} disabled={saving}>
-            {saving ? <><span className="spinner" />{(atFrontier && frontierLast) || expired ? 'Submitting…' : 'Saving…'}</>
-              : err ? 'Try again' : !atFrontier ? <>Next<Icon name="chevronRight" size={16} /></> : frontierLast ? 'Finish test' : <>Next<Icon name="chevronRight" size={16} /></>}
+          <button className="icon-btn theme-toggle" onClick={onToggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={17} />
+          </button>
+          <button className="icon-btn exam-logout" onClick={doLogout} aria-label="Log out">
+            <Icon name="logout" size={17} />
           </button>
         </div>
+      </header>
+
+      <div className="exam-dashboard">
+        <aside className={'exam-panel exam-info-panel' + (mobileInfoOpen ? ' info-open' : ' info-closed')}>
+          <button type="button" className="panel-head panel-toggle" onClick={() => setMobileInfoOpen(v => !v)} aria-expanded={mobileInfoOpen} aria-controls="exam-info-content">
+            <span className="panel-icon"><Icon name="info" size={16} /></span>
+            <span>Exam Information</span>
+            <span className="panel-caret"><Icon name={mobileInfoOpen ? 'chevronUp' : 'chevronDown'} size={16} /></span>
+          </button>
+
+          <div id="exam-info-content" className="exam-info-content">
+            <div className="exam-info-title">
+              <div className="mini-doc"><Icon name="file" size={28} /></div>
+              <div>{examTitle}</div>
+            </div>
+
+            <div className="info-list">
+              <div className="info-row"><span className="info-icon"><Icon name="user" size={15} /></span><div><small>Student Name</small><strong>{studentName}</strong></div></div>
+              <div className="info-row"><span className="info-icon"><Icon name="user" size={15} /></span><div><small>Roll Number</small><strong>{studentRoll}</strong></div></div>
+              <div className="info-row"><span className="info-icon"><Icon name="quiz" size={15} /></span><div><small>Total Questions</small><strong>{n}</strong></div></div>
+              <div className="info-row"><span className="info-icon"><Icon name="chart" size={15} /></span><div><small>Total Marks</small><strong>{T.run.reduce((sum, qq) => sum + (qq.maxMarks || 1), 0)}</strong></div></div>
+              <div className="info-row"><span className="info-icon"><Icon name="clock" size={15} /></span><div><small>Duration</small><strong>{T.perQ && T.run.length ? Math.round((T.perQ * T.run.length) / 60) + ' mins' : 'No limit'}</strong></div></div>
+            </div>
+
+            <div className="instruction-box">
+              <div className="subhead">Instructions</div>
+              <ul>
+                <li><span className="check-bullet"><Icon name="check" size={12} /></span>Read each question carefully.</li>
+                <li><span className="check-bullet"><Icon name="check" size={12} /></span>You can navigate between questions.</li>
+                <li><span className="check-bullet"><Icon name="check" size={12} /></span>Submit before the time ends.</li>
+              </ul>
+            </div>
+
+            <div className="answer-stats">
+              <div className="stat-box ok-box">
+                <span className="stat-icon"><Icon name="check" size={14} /></span>
+                <span>Answered</span>
+                <strong>{answered}</strong>
+              </div>
+              <div className="stat-box bad-box">
+                <span className="stat-icon"><Icon name="alert" size={14} /></span>
+                <span>Unanswered</span>
+                <strong>{unanswered}</strong>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <main className="exam-panel exam-main-panel">
+          <div className="main-top-row">
+            <div className="badge-group">
+              <span className="quiz-badge">Question {view + 1} of {n}</span>
+              <span className="quiz-badge type-badge">{q.type === 'subjective' ? 'SUBJECTIVE' : q.type === 'truefalse' ? 'TRUE/FALSE' : 'MCQ'}</span>
+            </div>
+            <div className="main-marks">Max Marks: {q.maxMarks || 4}</div>
+          </div>
+
+          <div className="question-card-shell">
+            <h2 className="question-title">{q.text}</h2>
+
+            {subjective ? (
+              <>
+                {q.instructions && <p className="muted small-text question-instructions">{q.instructions}</p>}
+                <AnswerEditor value={T.subjectiveText[view] || ''} onChange={chooseText} disabled={saving || expired} />
+              </>
+            ) : (
+              <div role="radiogroup" aria-label={'Options for question ' + (view + 1)} className="options-list">
+                {q.options.map((o, i) => (
+                  <button key={i} role="radio" aria-checked={sel === i} className={'opt' + (sel === i ? ' sel' : '')} disabled={saving || expired} onClick={() => choose(i)}>
+                    <span className="k">{optionLabel(i)}</span>
+                    <span className="option-text">{o}</span>
+                    {sel === i && <span className="check"><Icon name="checkCircle" size={18} /></span>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="exam-actions">
+              <button className="ghost lg exam-nav-btn" onClick={goPrev} disabled={saving || (!canGoPrev && view === 0)}><Icon name="chevronLeft" size={16} />Previous</button>
+              <button className="lg exam-nav-btn primary-btn" onClick={goNext} disabled={saving}>
+                {!atFrontier ? 'Next' : frontierLast ? 'Finish' : 'Next'}
+                <Icon name="chevronRight" size={16} />
+              </button>
+            </div>
+          </div>
+
+          <div className="panel-actions-row">
+            <span className={'save-state' + (saveState === 'error' ? ' bad' : '')} aria-live="polite">
+              {saveState === 'saving' && <><span className="spinner" />Saving…</>}
+              {saveState === 'saved' && <><Icon name="check" size={15} />Saved</>}
+              {saveState === 'error' && <><Icon name="alert" size={15} />Not saved</>}
+            </span>
+          </div>
+
+          {notice && <p className="notice" role="status"><Icon name="info" size={16} />{notice}</p>}
+          <p className="err msg" role="alert">{err}</p>
+        </main>
+
+        <aside className="exam-panel exam-palette-panel">
+          <div className="panel-head">
+            <span className="panel-icon"><Icon name="quiz" size={16} /></span>
+            <span>Question Palette</span>
+          </div>
+
+          <QuestionNavigator count={n} idx={T.idx} view={view} answers={T.answers} run={T.run} subjectiveText={T.subjectiveText} />
+
+          <button className="submit-btn" onClick={() => setConfirming(true)}>
+            <Icon name="report" size={16} />
+            Submit Quiz
+          </button>
+        </aside>
       </div>
-      <div className="notice warn">
-        <Icon name="lock" size={16} />
-        <span>
-          {!atFrontier ? 'You are revising an earlier answer. Use Next to return to where you left off.'
-            : frontierLast ? 'This is the last question. Finishing submits the whole test.'
-            : subjective ? 'Subjective answers can be revised with Previous/Next until you submit the test.'
-            : <>Once you click <b>Next</b>, this question is locked{sel >= 0 ? '' : ' as skipped'} and you cannot come back to it. Time saved by answering early stays available for the rest of the test.</>}
-        </span>
-      </div>
-      {notice && <p className="notice" role="status"><Icon name="info" size={16} />{notice}</p>}
-      <p className="err msg" role="alert">{err}</p>
 
       {confirming && !done.current && (
         <ConfirmDialog title="Submit your test?"
           message={(unanswered ? unanswered + ' question' + (unanswered === 1 ? ' is' : 's are') + ' unanswered. ' : 'All questions answered. ') + 'After submitting you cannot change any answer.'}
           confirmText="Submit test" cancelText="Not yet" onClose={ok => (ok ? finish(Tref.current) : setConfirming(false))} />
       )}
-      </div>
     </div>
   );
 }

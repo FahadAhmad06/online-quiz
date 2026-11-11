@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { waitUntil } from '@vercel/functions';
 import Attempt from '../models/Attempt.js';
 import Result from '../models/Result.js';
 import Paper from '../models/Paper.js';
@@ -11,6 +12,7 @@ import { recordRun, recordBatch } from './evalMetrics.js';
 // One limiter for the whole process: answers of one submission grade in parallel, but concurrent
 // submissions from many students still never exceed EVAL_CONCURRENCY AI calls at once.
 export const limiter = createLimiter(config.evalConcurrency);
+let pendingSweep = null;
 
 // A claim older than this belongs to a run that died (process restart, serverless freeze). It is
 // the longest a live run can take: both providers hitting the timeout on every attempt, plus the
@@ -88,6 +90,23 @@ export async function queueAttemptEvaluations(attemptId) {
   const ran = await Promise.allSettled(todo.map(idx => limiter.run(wait => evaluateIndex(attemptId, idx, wait))));
   const graded = ran.filter(r => r.status === 'fulfilled' && r.value).length;
   if (graded) recordBatch({ answers: graded, wallMs: performance.now() - t0 });
+  schedulePendingSweep();
+}
+
+// Once the current queue drains, catch up every other submitted paper that still has work.
+// This covers submissions whose fire-and-forget task was interrupted by a serverless response
+// and keeps an idle in-memory queue from leaving pending papers stranded until an admin retries.
+function schedulePendingSweep() {
+  if (pendingSweep || limiter.active || limiter.waiting) return;
+  let mayHaveMore = false;
+  pendingSweep = processPending()
+    .then(processed => { mayHaveMore = processed >= 20; })
+    .catch(e => console.error('[eval] pending sweep failed:', e.message))
+    .finally(() => {
+      pendingSweep = null;
+      if (mayHaveMore) schedulePendingSweep();
+    });
+  waitUntil(pendingSweep);
 }
 
 // Puts one failed answer back to 'pending' and starts grading it. `transientOnly` limits it to
@@ -100,21 +119,21 @@ export async function retryFailed(attemptId, idx, { transientOnly, by }) {
     { arrayFilters: [{ 'e.idx': idx }] }
   );
   if (!r.modifiedCount) return false;
-  queueAttemptEvaluations(String(attemptId)).catch(() => {});
   return true;
 }
 
 // Catch-up sweep, safe to call repeatedly / on a timer: grades anything still 'pending' (e.g. the
-// fire-and-forget never ran on a serverless host), reclaims 'evaluating' entries whose lease
-// expired (the run died before writing - they go back to pending, never to a result), and retries
-// transient failures under EVAL_MAX_RUNS. Never touches awaiting_review/approved/manual_review,
-// and never steals a claim that is still within its lease.
+// queue kick never ran), reclaims 'evaluating' entries whose lease expired (the run died before
+// writing - they go back to pending), and retries transient failures under EVAL_MAX_RUNS. Preview
+// attempts follow the same lifecycle; finalizeIfReady still avoids creating a Result for them.
+// Never touches awaiting_review/approved/manual_review, and never steals a claim that is still
+// within its lease.
 export async function processPending(limit = 20) {
   const cutoff = new Date(Date.now() - LEASE_MS);
   const stale = { status: 'evaluating', $or: [{ claimedAt: { $lt: cutoff } }, { claimedAt: null }] };
   const retryable = { status: 'failed', retryCount: { $lt: config.evalMaxRuns }, $or: [{ failKind: 'transient' }, { failKind: null, failReason: LEGACY_TRANSIENT }],
     $nor: [{ retryAfter: { $gt: new Date() } }] };
-  const found = await Attempt.find({ needsGrading: true, preview: false, evaluations: { $elemMatch: { $or: [{ status: 'pending' }, stale, retryable] } } })
+  const found = await Attempt.find({ needsGrading: true, evaluations: { $elemMatch: { $or: [{ status: 'pending' }, stale, retryable] } } })
     .select('_id evaluations.idx evaluations.status evaluations.claimToken evaluations.claimedAt evaluations.failKind evaluations.failReason evaluations.retryCount evaluations.retryAfter')
     .limit(limit).lean();
   let processed = 0;
